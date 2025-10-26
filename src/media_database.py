@@ -204,6 +204,44 @@ class MediaDatabase:
 
         return item
 
+    def download_episode_still(self, still_path: str, tmdb_show_id: int, season_number: int, episode_number: int) -> Optional[str]:
+        """
+        Download and save a TV episode still image locally.
+
+        Args:
+            still_path: TMDB still image path (e.g., '/abc123.jpg')
+            tmdb_show_id: TMDB show ID
+            season_number: Season number
+            episode_number: Episode number
+
+        Returns:
+            Filename of downloaded image in local images dir or None if fails
+        """
+        if not still_path:
+            return None
+        try:
+            base_url = "https://image.tmdb.org/t/p/"
+            size = "w342"
+            full_url = f"{base_url}{size}{still_path}"
+
+            filename = f"{tmdb_show_id}_S{int(season_number):02d}E{int(episode_number):02d}_still_{os.path.basename(still_path)}"
+            local_path = self.images_dir / filename
+
+            if not local_path.exists():
+                print(f"[Database] Downloading episode still: {full_url}")
+                response = requests.get(full_url, timeout=10)
+                response.raise_for_status()
+                with open(local_path, 'wb') as f:
+                    f.write(response.content)
+                print(f"[Database] Saved episode still to: {local_path}")
+            else:
+                print(f"[Database] Using cached episode still: {local_path}")
+
+            return filename
+        except Exception as e:
+            print(f"[Database] Error downloading episode still {still_path}: {e}")
+            return None
+
     def _download_images(self, item: Dict) -> Dict:
         """
         Download and cache images for media item. Called from API after metadata assignment.

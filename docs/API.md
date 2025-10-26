@@ -197,6 +197,19 @@ Chyby: 404 pokud obrázek neexistuje.
 	- Vrátí detailní metadata pro TV show (včetně seznamu sezon `seasons` a `internal_id`).
 	- 404 pokud není nalezen.
 
+- GET /api/tv-show/<int:tmdb_id>/season/<int:season_number>/episode/<int:episode_number>
+	- Vrátí detailní informace o konkrétní epizodě (obdoba TMDB endpointu) a pokud je k dispozici, doplní lokální informace (`local_path`, `filename`, `stream_available`).
+	- 404 pokud epizoda není nalezena ani v TMDB, ani v lokálních datech.
+
+- GET /api/tv-show/<int:tmdb_id>/season/<int:season_number>
+	- Vrátí seznam epizod pro danou sezónu. Každá epizoda obsahuje pole:
+		- `id`, `name`, `overview`, `air_date`, `episode_number`, `episode_type`, `runtime`, `season_number`, `show_id`, `still_path`, `vote_average`
+		- a navíc (pokud je k dispozici lokálně): `local_path`, `filename`, `stream_available`
+	- Alias: `/api/tv/<tmdb_id>/season/<season_number>`
+
+- GET /api/tv-show/<int:tmdb_id>/season/<int:season_number>/episode/<int:episode_number>/stream
+	- Streamuje lokální soubor epizody, pokud je k dispozici. Alias: `/api/tv/<...>/season/<...>/episode/<...>/stream`
+
 ### Streamy (video soubory)
 
 - GET /api/streams

@@ -1,6 +1,6 @@
 # Streamlet Connector
 
-Streamlet Connector je metadata parser pro filmy a seriály, který slouží jako most mezi vašimi lokálními mediálními soubory a streamovacími platformami. Projekt poskytuje REST API pro správu mediální databáze, vyhledávání metadat přes TMDB a webové rozhraní pro snadnou správu.
+Streamlet Connector je metadata parser pro filmy a seriály, který slouží jako most mezi vašimi lokálními mediálními soubory a Streamletem. Projekt poskytuje REST API pro správu mediální databáze, vyhledávání metadat a stahování dat přes TMDB a webové rozhraní pro snadnou správu.
 
 ## Funkce
 
@@ -20,7 +20,7 @@ Streamlet Connector je metadata parser pro filmy a seriály, který slouží jak
 
 1. **Klonujte repozitář:**
    ```bash
-   git clone https://github.com/yourusername/streamlet_connector.git
+   git clone https://github.com/Halusak/streamlet_connector
    cd streamlet_connector
    ```
 

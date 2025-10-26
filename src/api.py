@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_file, render_template_string, send_from_directory
+from flask import Flask, request, jsonify, send_file, render_template_string, send_from_directory, Response
 import json
 import os
 from pathlib import Path
@@ -7,6 +7,17 @@ from src.media_database import MediaDatabase
 from src.scanner import MediaScanner
 from src.tmdb_client import TMDBClient
 from src.progress_tracker import ProgressTracker
+import mimetypes
+
+# Ensure common video mime types are known (Windows mimetypes may miss some)
+mimetypes.add_type('video/mp4', '.mp4')
+mimetypes.add_type('video/x-m4v', '.m4v')
+mimetypes.add_type('video/webm', '.webm')
+mimetypes.add_type('video/x-matroska', '.mkv')
+mimetypes.add_type('video/x-msvideo', '.avi')
+mimetypes.add_type('video/quicktime', '.mov')
+mimetypes.add_type('video/x-ms-wmv', '.wmv')
+mimetypes.add_type('video/x-flv', '.flv')
 
 class CustomAPI:
     """Custom API to serve media data and files."""
@@ -366,6 +377,101 @@ class CustomAPI:
                         return jsonify(result), 200
             return jsonify({'error': 'TV show not found'}), 404
 
+        @self.app.route('/api/tv-show/<int:tmdb_id>/season/<int:season_number>/episode/<int:episode_number>', methods=['GET'])
+        def get_tv_episode_details(tmdb_id, season_number, episode_number):
+            """Get details about a specific TV episode (mirrors TMDB style), augmented with local file info if available."""
+            # Try to locate the TV show in local DB to enrich with local episode path
+            local_item = None
+            for item in self.database.get_all_items():
+                if item.get('type') == 'tv_show' and 'metadata' in item and item['metadata'].get('id') == tmdb_id:
+                    local_item = item
+                    break
+
+            # Fetch TMDB episode details if possible
+            episode_meta = self.tmdb_client.get_tv_episode_details(tmdb_id, season_number, episode_number)
+
+            response_data = episode_meta or {}
+            response_data.setdefault('season_number', int(season_number))
+            response_data.setdefault('episode_number', int(episode_number))
+            response_data['tmdb_show_id'] = tmdb_id
+
+            # Attach local file info when present
+            found_local = False
+            if local_item:
+                for season in local_item.get('seasons', []):
+                    if int(season.get('season')) == int(season_number):
+                        for ep in season.get('episodes', []):
+                            if int(ep.get('episode')) == int(episode_number):
+                                response_data['local_path'] = ep.get('path')
+                                response_data['filename'] = ep.get('filename')
+                                response_data['stream_available'] = os.path.exists(ep.get('path')) if ep.get('path') else False
+                                found_local = True
+                                break
+            if not episode_meta and not found_local:
+                return jsonify({'error': 'Episode not found'}), 404
+            return jsonify(response_data), 200
+
+        @self.app.route('/api/tv-show/<int:tmdb_id>/season/<int:season_number>', methods=['GET'])
+        @self.app.route('/api/tv/<int:tmdb_id>/season/<int:season_number>', methods=['GET'])
+        def get_tv_season(tmdb_id, season_number):
+            """Get all episodes for a TV season with normalized fields and local stream info where available."""
+            try:
+                episodes = self.tmdb_client.get_tv_season_episodes(tmdb_id, season_number) if self.tmdb_client else []
+
+                # Merge local info if show exists in DB
+                local_item = None
+                for item in self.database.get_all_items():
+                    if item.get('type') == 'tv_show' and 'metadata' in item and item['metadata'].get('id') == tmdb_id:
+                        local_item = item
+                        break
+
+                if local_item:
+                    local_lookup = {}
+                    for season in local_item.get('seasons', []):
+                        if int(season.get('season')) == int(season_number):
+                            for ep in season.get('episodes', []):
+                                key = int(ep.get('episode')) if ep.get('episode') is not None else None
+                                if key is not None:
+                                    local_lookup[key] = ep
+                    # Attach local info to matching episode numbers
+                    for ep in episodes:
+                        ep_no = int(ep.get('episode_number')) if ep.get('episode_number') is not None else None
+                        if ep_no in local_lookup:
+                            lep = local_lookup[ep_no]
+                            ep['local_path'] = lep.get('path')
+                            ep['filename'] = lep.get('filename')
+                            ep['stream_available'] = os.path.exists(lep.get('path')) if lep.get('path') else False
+                            # Prefer local stored metadata name if present
+                            name_local = (lep.get('metadata') or {}).get('name') or lep.get('name')
+                            if name_local:
+                                ep['name'] = name_local
+                            # Attach local still if available
+                            if lep.get('local_still_path'):
+                                ep['local_still_path'] = lep.get('local_still_path')
+
+                return jsonify({ 'episodes': episodes }), 200
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/tv-show/<int:tmdb_id>/season/<int:season_number>/episode/<int:episode_number>/stream', methods=['GET'])
+        @self.app.route('/api/tv/<int:tmdb_id>/season/<int:season_number>/episode/<int:episode_number>/stream', methods=['GET'])
+        def stream_tv_episode(tmdb_id, season_number, episode_number):
+            """Stream a local episode file if available."""
+            try:
+                for item in self.database.get_all_items():
+                    if item.get('type') == 'tv_show' and 'metadata' in item and item['metadata'].get('id') == tmdb_id:
+                        for season in item.get('seasons', []):
+                            if int(season.get('season')) == int(season_number):
+                                for ep in season.get('episodes', []):
+                                    if int(ep.get('episode')) == int(episode_number):
+                                        path = ep.get('path')
+                                        if path and os.path.exists(path):
+                                            return self._send_partial_file(path)
+                                        return jsonify({'error': 'File not found'}), 404
+                return jsonify({'error': 'Episode not found'}), 404
+            except Exception as e:
+                return jsonify({'error': f'Failed to send file: {str(e)}'}), 500
+
         @self.app.route('/api/streams', methods=['GET'])
         def get_streams():
             """Get list of all video files (streams) with ID, name, type, size."""
@@ -400,12 +506,8 @@ class CustomAPI:
                 return jsonify({'error': 'File not found'}), 404
             
             try:
-                # Return the actual file for streaming/download
-                return send_file(
-                    file_path,
-                    as_attachment=False,
-                    download_name=os.path.basename(file_path)
-                )
+                # Return the actual file for streaming with Range support
+                return self._send_partial_file(file_path)
             except Exception as e:
                 return jsonify({'error': f'Failed to send file: {str(e)}'}), 500
 
@@ -486,3 +588,77 @@ class CustomAPI:
         print(f"   http://localhost:{self.port}/ui\n")
         
         self.app.run(host=self.host, port=self.port, debug=False, threaded=True)
+
+    def _send_partial_file(self, file_path: str):
+        """Send file with HTTP Range support for HTML5 video seeking."""
+        file_size = os.path.getsize(file_path)
+        range_header = request.headers.get('Range', None)
+        # Robust mime detection with fallback by extension
+        mime_type, _ = mimetypes.guess_type(file_path)
+        if not mime_type:
+            ext = os.path.splitext(file_path)[1].lower()
+            ext_map = {
+                '.mp4': 'video/mp4',
+                '.m4v': 'video/x-m4v',
+                '.webm': 'video/webm',
+                '.mkv': 'video/x-matroska',
+                '.avi': 'video/x-msvideo',
+                '.mov': 'video/quicktime',
+                '.wmv': 'video/x-ms-wmv',
+                '.flv': 'video/x-flv',
+            }
+            mime_type = ext_map.get(ext, 'application/octet-stream')
+
+        if range_header:
+            # Example Range: "bytes=0-" or "bytes=1000-2000"
+            try:
+                units, range_spec = range_header.split('=', 1)
+                if units.strip() != 'bytes':
+                    raise ValueError('Only bytes unit is supported')
+                start_str, end_str = (range_spec or '').split('-', 1)
+                start = int(start_str) if start_str else 0
+                end = int(end_str) if end_str else file_size - 1
+                # Clamp values
+                start = max(0, start)
+                end = min(end, file_size - 1)
+                if start > end:
+                    start = 0
+                    end = file_size - 1
+
+                length = end - start + 1
+
+                def generate():
+                    with open(file_path, 'rb') as f:
+                        f.seek(start)
+                        remaining = length
+                        chunk_size = 8192
+                        while remaining > 0:
+                            chunk = f.read(min(chunk_size, remaining))
+                            if not chunk:
+                                break
+                            remaining -= len(chunk)
+                            yield chunk
+
+                headers = {
+                    'Content-Range': f'bytes {start}-{end}/{file_size}',
+                    'Accept-Ranges': 'bytes',
+                    'Content-Length': str(length),
+                }
+                return Response(generate(), status=206, headers=headers, mimetype=mime_type)
+            except Exception:
+                # Fallback to full file on parse error
+                pass
+
+        # No Range header or parse error: send full file
+        headers = {
+            'Accept-Ranges': 'bytes',
+            'Content-Length': str(file_size),
+        }
+        def generate_full():
+            with open(file_path, 'rb') as f:
+                while True:
+                    data = f.read(8192)
+                    if not data:
+                        break
+                    yield data
+        return Response(generate_full(), status=200, headers=headers, mimetype=mime_type)

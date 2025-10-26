@@ -8,6 +8,16 @@ class MediaScanner:
     """Scanner for movies and TV shows in specified folders."""
 
     VIDEO_EXTENSIONS = {'.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v'}
+    # Common folder names indicating seasons (multi-language)
+    SEASON_DIR_PATTERN = re.compile(r"^(?:s(?:eason)?\s*|sez(?:ona|óna)\s*|serie\s*|series\s*|saison\s*)(\d{1,3})$",
+                                    re.IGNORECASE)
+    # Episode filename patterns: S01E02, 1x02, s1 e2, season 1 episode 2
+    EPISODE_PATTERNS = [
+        re.compile(r"[sS](\d{1,2})[\W_]*[eE](\d{1,2})"),
+        re.compile(r"(\d{1,2})\s*[xX]\s*(\d{1,2})"),
+        re.compile(r"season\s*(\d{1,2})\D*episode\s*(\d{1,2})", re.IGNORECASE),
+        re.compile(r"\b(\d{1,2})\s*\.\s*(\d{1,2})\b")  # e.g., 1.02
+    ]
 
     def __init__(self, folders: List[str]):
         self.folders = []
@@ -87,8 +97,8 @@ class MediaScanner:
         try:
             # Walk through directory tree
             for root, dirs, files in os.walk(folder):
-                # Check if this looks like a TV show folder (has Season folders)
-                season_dirs = [d for d in dirs if re.search(r'season\s*\d+', d, re.IGNORECASE)]
+                # Check if this looks like a TV show folder (has Season-like folders)
+                season_dirs = [d for d in dirs if self.SEASON_DIR_PATTERN.search(d) or re.search(r"^s\d{1,3}$", d, re.IGNORECASE)]
                 
                 if season_dirs:
                     # This is a TV show folder
@@ -99,20 +109,85 @@ class MediaScanner:
                     # Don't recurse into season folders
                     dirs[:] = []
                 else:
-                    # Look for movie files in this directory
+                    # Detect if directory contains TV episodes by filename
+                    episode_files = []
                     for filename in files:
-                        _, ext = os.path.splitext(filename)
-                        if ext.lower() in self.VIDEO_EXTENSIONS:
-                            file_path = os.path.join(root, filename)
-                            movie = self._parse_movie(file_path)
-                            if movie:
-                                items.append(movie)
-                                print(f"[Scanner] Found movie: {movie['title']}")
+                        season_ep = self._extract_episode_info(filename)
+                        if season_ep is not None:
+                            season_num, ep_num = season_ep
+                            _, ext = os.path.splitext(filename)
+                            if ext.lower() in self.VIDEO_EXTENSIONS:
+                                episode_files.append((season_num, ep_num, filename))
+
+                    if len(episode_files) >= 2:
+                        # Heuristic: if 2+ episode files, treat as TV show folder
+                        print(f"[Scanner] Detected TV show by episode filenames: {root}")
+                        show = self._build_tv_show_from_files(root, episode_files)
+                        if show:
+                            items.append(show)
+                        # Do not descend further from here for this root
+                        dirs[:] = []
+                    else:
+                        # Look for movie files in this directory
+                        for filename in files:
+                            _, ext = os.path.splitext(filename)
+                            if ext.lower() in self.VIDEO_EXTENSIONS:
+                                file_path = os.path.join(root, filename)
+                                movie = self._parse_movie(file_path)
+                                if movie:
+                                    items.append(movie)
+                                    print(f"[Scanner] Found movie: {movie['title']}")
         
         except Exception as e:
             print(f"[Scanner] Error walking directory {folder}: {e}")
         
         return items
+
+    def _extract_episode_info(self, filename: str) -> Optional[tuple]:
+        """Try to extract (season, episode) from a filename using common patterns."""
+        try:
+            name = os.path.splitext(filename)[0]
+            for pattern in self.EPISODE_PATTERNS:
+                m = pattern.search(name)
+                if m:
+                    s, e = m.groups()
+                    return int(s), int(e)
+        except Exception:
+            pass
+        return None
+
+    def _build_tv_show_from_files(self, folder_path: str, episode_files: List[tuple]) -> Optional[Dict]:
+        """Build a tv_show item from a flat folder containing episode files."""
+        try:
+            folder_name = os.path.basename(folder_path)
+            show_name = re.sub(r'\s*\(?\d{4}\)?$', '', folder_name).strip()
+
+            seasons_map: Dict[int, List[Dict]] = {}
+            for season_num, ep_num, filename in episode_files:
+                ep_list = seasons_map.setdefault(season_num, [])
+                ep_list.append({
+                    'season': season_num,
+                    'episode': ep_num,
+                    'path': os.path.join(folder_path, filename),
+                    'filename': filename
+                })
+
+            seasons = []
+            for s in sorted(seasons_map.keys()):
+                # sort episodes by episode number
+                eps = sorted(seasons_map[s], key=lambda x: x['episode'])
+                seasons.append({'season': s, 'episodes': eps})
+
+            if seasons:
+                return {
+                    'type': 'tv_show',
+                    'title': show_name,
+                    'path': folder_path,
+                    'seasons': seasons
+                }
+        except Exception as e:
+            print(f"[Scanner] Error building TV show from files in {folder_path}: {e}")
+        return None
 
     def _parse_movie(self, file_path: str) -> Optional[Dict]:
         """Parse movie information from file path."""
@@ -158,9 +233,9 @@ class MediaScanner:
             
             seasons = []
             
-            # Find season folders
+            # Find season folders (support multiple naming variants)
             for subdir in subdirs:
-                season_match = re.search(r'season\s*(\d+)', subdir, re.IGNORECASE)
+                season_match = self.SEASON_DIR_PATTERN.search(subdir) or re.search(r'^s(\d{1,3})$', subdir, re.IGNORECASE)
                 if season_match:
                     season_num = int(season_match.group(1))
                     season_path = os.path.join(folder_path, subdir)
@@ -172,10 +247,13 @@ class MediaScanner:
                             if ext.lower() in self.VIDEO_EXTENSIONS:
                                 file_path = os.path.join(season_path, filename)
                                 
-                                # Try to extract episode info (S01E05 format)
-                                ep_match = re.search(r'[sS](\d+)[eE](\d+)', filename)
-                                if ep_match:
-                                    s, e = map(int, ep_match.groups())
+                                # Try to extract episode info from filename
+                                ep_info = self._extract_episode_info(filename)
+                                if ep_info:
+                                    s, e = ep_info
+                                    # If season not in filename, fallback to folder season
+                                    if s is None:
+                                        s = season_num
                                     episodes.append({
                                         'season': s,
                                         'episode': e,
@@ -210,11 +288,19 @@ class MediaScanner:
         items = self.scan()
         
         print(f"[Scanner] Enriching {len(items)} items with TMDB data...")
-        self.progress.start('tmdb', len(items), 'Získávání metadat z TMDB...')
+        # Calculate total work units: each item + each episode
+        episode_count = 0
+        for it in items:
+            if it.get('type') == 'tv_show':
+                for season in it.get('seasons', []) or []:
+                    episode_count += len(season.get('episodes', []) or [])
+        total_units = len(items) + episode_count
+        self.progress.start('tmdb', total_units, 'Získávání metadat z TMDB...')
         
         enriched_items = []
         for idx, item in enumerate(items):
-            self.progress.update(current=idx, current_item=item.get('title', 'Neznámý'))
+            # Announce current item
+            self.progress.update(current_item=item.get('title', 'Neznámý'))
             try:
                 if item['type'] == 'movie':
                     year = int(item['year']) if item.get('year') else None
@@ -230,6 +316,8 @@ class MediaScanner:
                             # Save to database immediately
                             database.add_or_update(item)
                             database.save()
+                    # Count this movie as one unit of work (metadata + images)
+                    self.progress.increment(current_item=item.get('title', 'Neznámý'))
                             
                 elif item['type'] == 'tv_show':
                     metadata = tmdb_client.search_tv_show(item['title'])
@@ -237,13 +325,48 @@ class MediaScanner:
                         item['metadata'] = metadata
                         print(f"[Scanner] Found TMDB data for TV show: {item['title']}")
                         
-                        # Download images immediately if database provided
+                        # Download show poster/backdrop and save
                         if database:
                             self.progress.update(message=f'Stahuji data pro: {item["title"]}')
                             database.enrich_with_images(item)
-                            # Save to database immediately
                             database.add_or_update(item)
                             database.save()
+                        # Count show-level enrichment as one unit
+                        self.progress.increment(current_item=item.get('title', 'Neznámý'))
+
+                        # Enrich episodes with TMDB details and still images
+                        show_id = metadata.get('id')
+                        if show_id and database:
+                            for season in item.get('seasons', []):
+                                s_no = season.get('season')
+                                for ep in season.get('episodes', []):
+                                    e_no = ep.get('episode')
+                                    if s_no is None or e_no is None:
+                                        continue
+                                    try:
+                                        label = f"{item['title']} S{int(s_no):02}E{int(e_no):02}"
+                                        self.progress.update(current_item=label, message=f'Stahuji data pro: {label}')
+                                        ep_meta = tmdb_client.get_tv_episode_details(show_id, int(s_no), int(e_no))
+                                        if ep_meta:
+                                            ep['metadata'] = ep_meta
+                                            # set human friendly name
+                                            if ep_meta.get('name'):
+                                                ep['name'] = ep_meta['name']
+                                            # download still image
+                                            still_path = ep_meta.get('still_path')
+                                            if still_path:
+                                                local_still = database.download_episode_still(still_path, show_id, int(s_no), int(e_no))
+                                                if local_still:
+                                                    ep['local_still_path'] = local_still
+                                        # Save progressively to avoid losing progress on long scans
+                                        database.add_or_update(item)
+                                        database.save()
+                                        # Count this episode unit
+                                        self.progress.increment(current_item=label)
+                                    except Exception as err:
+                                        print(f"[Scanner] Episode enrich failed S{s_no}E{e_no}: {err}")
+                                        # Even on failure, mark progress for this episode to avoid stalling
+                                        self.progress.increment(current_item=f"{item['title']} S{int(s_no):02}E{int(e_no):02}")
                             
             except Exception as e:
                 print(f"[Scanner] Error fetching TMDB data for {item.get('title')}: {e}")

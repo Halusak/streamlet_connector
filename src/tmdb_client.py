@@ -1,4 +1,5 @@
 import os
+import requests
 from tmdbv3api import TMDb, Movie, TV
 from typing import Optional, Dict, List
 
@@ -6,6 +7,9 @@ class TMDBClient:
     """Client for TMDB API to fetch media metadata."""
 
     def __init__(self, api_key: str, language: str = 'en-US'):
+        # Store raw values for fallback HTTP calls
+        self.api_key = api_key
+        self.language = language
         if api_key:
             self.tmdb = TMDb()
             self.tmdb.api_key = api_key
@@ -222,3 +226,66 @@ class TMDBClient:
         except Exception as e:
             print(f"Error searching TV shows {title}: {e}")
         return []
+
+    def get_tv_episode_details(self, tmdb_id: int, season_number: int, episode_number: int) -> Optional[Dict]:
+        """Get TV episode details by show TMDB ID, season and episode number using HTTP fallback."""
+        if not self.api_key:
+            return None
+        try:
+            url = (
+                f"https://api.themoviedb.org/3/tv/{tmdb_id}"
+                f"/season/{season_number}/episode/{episode_number}"
+            )
+            params = {"api_key": self.api_key, "language": self.language or "en-US"}
+            resp = requests.get(url, params=params, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            # Normalize subset of fields
+            return {
+                'id': data.get('id'),
+                'name': data.get('name'),
+                'overview': data.get('overview', ''),
+                'air_date': data.get('air_date'),
+                'season_number': data.get('season_number', season_number),
+                'episode_number': data.get('episode_number', episode_number),
+                'episode_type': data.get('episode_type'),
+                'still_path': data.get('still_path'),
+                'vote_average': data.get('vote_average', 0),
+                'vote_count': data.get('vote_count', 0),
+                'runtime': data.get('runtime'),
+                'show_id': tmdb_id
+            }
+        except Exception as e:
+            print(f"Error getting TV episode details for {tmdb_id} S{season_number}E{episode_number}: {e}")
+            return None
+
+    def get_tv_season_episodes(self, tmdb_id: int, season_number: int) -> List[Dict]:
+        """Get all episodes for a TV season with normalized fields."""
+        if not self.api_key:
+            return []
+        try:
+            url = f"https://api.themoviedb.org/3/tv/{tmdb_id}/season/{season_number}"
+            params = {"api_key": self.api_key, "language": self.language or "en-US"}
+            resp = requests.get(url, params=params, timeout=10)
+            resp.raise_for_status()
+            data = resp.json() or {}
+            episodes = data.get('episodes', []) or []
+            normalized = []
+            for ep in episodes:
+                normalized.append({
+                    'id': ep.get('id'),
+                    'name': ep.get('name'),
+                    'overview': ep.get('overview', ''),
+                    'air_date': ep.get('air_date'),
+                    'episode_number': ep.get('episode_number'),
+                    'episode_type': ep.get('episode_type'),
+                    'runtime': ep.get('runtime'),
+                    'season_number': ep.get('season_number', season_number),
+                    'show_id': tmdb_id,
+                    'still_path': ep.get('still_path'),
+                    'vote_average': ep.get('vote_average', 0)
+                })
+            return normalized
+        except Exception as e:
+            print(f"Error getting TV season episodes for {tmdb_id} S{season_number}: {e}")
+            return []

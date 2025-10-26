@@ -1,0 +1,23 @@
+# Ignore data folder (media files, downloaded images, etc.)
+data/
+
+# Ignore specific config file that may contain local secrets or environment-specific settings
+config/config.json
+
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+
+# dotenv files
+.env
+
+# Editor directories
+.vscode/
+.idea/
+config/config.json
+config/config.json

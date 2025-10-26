@@ -487,12 +487,35 @@
         }
         
         // ========== Item Detail ==========
-        function showItemDetail(internalId) {
+        async function showItemDetail(internalId) {
             const item = allItems.find(i => i.internal_id === internalId);
             if (!item) return;
             
             let content = '';
-            if (item.has_metadata) {
+            if (item.type === 'tv_show') {
+                // Load full TV show details (includes seasons/episodes)
+                try {
+                    if (!item.tmdb_id) {
+                        // Without TMDB ID we can't fetch details — show assign metadata prompt
+                        content = `
+                            <div style="text-align: center; padding: 40px;">
+                                <div style="font-size: 64px; margin-bottom: 20px;">📺</div>
+                                <h2 style="color: #9DD8FF; margin-bottom: 15px;">Seriál</h2>
+                                <p style="color: #ccc; margin-bottom: 25px; font-size: 14px; word-break: break-all;">${item.display_title || item.title || ''}</p>
+                                <button class="action-btn" onclick="assignMetadata(${item.internal_id})">🔍 Přiřadit metadata z TMDB</button>
+                            </div>
+                        `;
+                    } else {
+                        const resp = await fetch(`/api/tv-show/${item.tmdb_id}`);
+                        const details = await resp.json();
+                        content = renderTvShowDetails(details);
+                        // Render then fetch and fill per-season episode names
+                        setTimeout(() => loadSeasonsEpisodes(details), 0);
+                    }
+                } catch (err) {
+                    content = `<div class="error">Chyba při načítání detailu seriálu: ${err.message}</div>`;
+                }
+            } else if (item.has_metadata) {
                 let posterHtml;
                 if (item.poster) {
                     const posterUrl = item.poster.startsWith('http') ? item.poster : `/api/images/${item.poster}`;
@@ -532,11 +555,98 @@
             document.getElementById('modalContent').innerHTML = content;
             document.getElementById('itemModal').classList.add('active');
         }
+
+        function renderTvShowDetails(details) {
+            const posterUrl = details.local_poster_path ? `/api/images/${details.local_poster_path}` : (details.poster_path ? `https://image.tmdb.org/t/p/w342${details.poster_path}` : null);
+            const posterHtml = posterUrl ? `<img class="modal-poster" src="${posterUrl}" alt="${details.name || details.title}">` : '<div class="modal-poster" style="background: #2a2a2a;"></div>';
+            const title = details.name || details.title || 'Seriál';
+            const rating = details.vote_average ? `⭐ ${Number(details.vote_average).toFixed(1)}` : '';
+            const year = (details.first_air_date || '').substring(0,4);
+
+            let seasonsHtml = '';
+            const seasons = Array.isArray(details.seasons) ? details.seasons : [];
+            if (seasons.length === 0) {
+                seasonsHtml = '<div class="empty-state-text" style="padding: 10px 0;">Žádné epizody nebyly nalezeny</div>';
+            } else {
+                seasonsHtml = seasons.map(season => {
+                    return `
+                        <div style="margin-bottom: 12px;">
+                            <div style="font-weight:bold; color:#9DD8FF; margin: 10px 0 6px;">Sezóna ${season.season}</div>
+                            <ul id="episodes-${season.season}" style="list-style:none; padding-left:0;">
+                                <li style="padding: 6px 0; color:#777;">Načítám epizody...</li>
+                            </ul>
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            return `
+                <div class="modal-header">
+                    ${posterHtml}
+                    <div class="modal-info">
+                        <h2 class="modal-title">${title}</h2>
+                        <div class="modal-meta">${year || ''} • ${rating}</div>
+                        <div class="modal-overview">${details.overview || 'Žádný popis'}</div>
+                        <button class="action-btn secondary" onclick="assignMetadata(${details.internal_id})" style="background: #ff9800; color: #fff;">🔄 Změnit metadata TMDB</button>
+                    </div>
+                </div>
+                <div id="videoPlayer"></div>
+                <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #333;">
+                    ${seasonsHtml}
+                </div>
+            `;
+        }
+
+        async function loadSeasonsEpisodes(details) {
+            const showId = details.id;
+            const seasons = Array.isArray(details.seasons) ? details.seasons : [];
+            for (const season of seasons) {
+                const target = document.getElementById(`episodes-${season.season}`);
+                if (!target) continue;
+                try {
+                    const resp = await fetch(`/api/tv-show/${showId}/season/${season.season}`);
+                    const data = await resp.json();
+                    const episodes = Array.isArray(data.episodes) ? data.episodes : [];
+
+                    if (episodes.length === 0) {
+                        target.innerHTML = '<li style="padding:6px 0; color:#777;">Žádné epizody</li>';
+                        continue;
+                    }
+
+                    target.innerHTML = episodes.map(ep => {
+                        const epNum = ep.episode_number;
+                        const label = `S${String(season.season).padStart(2,'0')}E${String(epNum).padStart(2,'0')} — ${ep.name || 'Epizoda'}`;
+                        const canPlay = ep.stream_available;
+                        const playBtn = canPlay ? `<button class="action-btn" style="padding:6px 10px; font-size:12px;" onclick="playEpisode(${showId}, ${season.season}, ${epNum})">▶ Přehrát</button>` : '';
+                        const fileNote = ep.filename ? `<span style="color:#777;">${ep.filename}</span>` : '';
+                        const stillUrl = ep.local_still_path ? `/api/images/${ep.local_still_path}` : (ep.still_path ? `https://image.tmdb.org/t/p/w185${ep.still_path}` : null);
+                        const stillHtml = stillUrl ? `<img src="${stillUrl}" alt="still" style="width:80px; height:45px; object-fit:cover; border-radius:4px;">` : '';
+                        return `
+                            <li style="padding: 6px 0; border-bottom: 1px solid #222; display:flex; justify-content:space-between; align-items:center; gap:12px;">
+                                <span style="display:flex; align-items:center; gap:10px;">${stillHtml}<span>${label}</span></span>
+                                <span style="display:flex; gap:10px; align-items:center;">${fileNote}${playBtn}</span>
+                            </li>
+                        `;
+                    }).join('');
+                } catch (e) {
+                    target.innerHTML = `<li style=\"padding:6px 0; color:#ff6b6b;\">Chyba: ${e.message}</li>`;
+                }
+            }
+        }
+
+        function playEpisode(showId, season, episode) {
+            const url = `/api/tv-show/${showId}/season/${season}/episode/${episode}/stream`;
+            document.getElementById('videoPlayer').innerHTML = `
+                <video controls autoplay>
+                    <source src="${url}">
+                    Váš prohlížeč nepodporuje přehrávání videa.
+                </video>`;
+        }
         
         function playStream(internalId) {
             document.getElementById('videoPlayer').innerHTML = `
                 <video controls autoplay>
-                    <source src="/api/stream/${internalId}" type="video/mp4">
+                    <source src="/api/stream/${internalId}">
                     Váš prohlížeč nepodporuje přehrávání videa.
                 </video>`;
         }
