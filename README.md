@@ -65,7 +65,7 @@ python run_api.py --host 0.0.0.0 --port 8000
 
 ## Konfigurace
 
-Upravte soubor `config/config.json`:
+Upravte soubor `config/config.json` (možnost upravovat i v UI):
 
 ```json
 {

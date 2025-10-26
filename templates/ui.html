@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Streamlet Connector</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f0f0f; color: #e0e0e0; }
+        
+        /* Header */
+        .header { background: #1a1a1a; padding: 15px 30px; border-bottom: 2px solid #9DD8FF; display: flex; justify-content: space-between; align-items: center; }
+        .logo { font-size: 24px; font-weight: bold; color: #9DD8FF; }
+        .nav { display: flex; gap: 20px; }
+        .nav-btn { padding: 8px 20px; background: #2a2a2a; border: none; color: #e0e0e0; cursor: pointer; border-radius: 5px; transition: all 0.3s; }
+        .nav-btn:hover, .nav-btn.active { background: #9DD8FF; color: #000; }
+        
+        /* Container */
+        .container { max-width: 1600px; margin: 0 auto; padding: 30px; }
+        .page { display: none; }
+        .page.active { display: block; }
+        
+        /* Search & Filters */
+        .search-bar { margin-bottom: 20px; display: flex; gap: 10px; flex-wrap: wrap; }
+        .search-input { flex: 1; min-width: 300px; padding: 12px; background: #1a1a1a; border: 1px solid #333; color: #e0e0e0; border-radius: 5px; font-size: 16px; }
+        .filter-btn { padding: 12px 24px; background: #2a2a2a; border: none; color: #e0e0e0; border-radius: 5px; cursor: pointer; transition: all 0.3s; }
+        .filter-btn.active { background: #9DD8FF; color: #000; }
+        .filter-btn:hover:not(.active) { background: #3a3a3a; }
+        
+        /* Grid & Cards */
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 20px; }
+        .card { background: #1a1a1a; border-radius: 8px; overflow: hidden; cursor: pointer; transition: transform 0.3s, box-shadow 0.3s; position: relative; }
+        .card:hover { transform: translateY(-5px); box-shadow: 0 5px 20px rgba(157,216,255,0.3); }
+        .card.no-metadata { border: 2px dashed #ff6b6b; }
+        .card-badge { position: absolute; top: 10px; right: 10px; padding: 5px 10px; background: #ff6b6b; border-radius: 5px; font-size: 12px; font-weight: bold; z-index: 1; }
+        .card img { width: 100%; height: 300px; object-fit: cover; }
+        .card-info { padding: 15px; }
+        .card-title { font-weight: bold; margin-bottom: 5px; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .card-meta { font-size: 12px; color: #999; display: flex; justify-content: space-between; align-items: center; }
+        .rating { color: #ffd700; }
+        
+        /* Modal */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 1000; overflow-y: auto; }
+        .modal.active { display: flex; align-items: center; justify-content: center; padding: 20px; }
+        .modal-content { max-width: 900px; width: 100%; background: #1a1a1a; border-radius: 12px; padding: 30px; position: relative; max-height: 90vh; overflow-y: auto; }
+        .close-btn { position: absolute; top: 15px; right: 20px; font-size: 30px; cursor: pointer; color: #999; transition: color 0.3s; }
+        .close-btn:hover { color: #fff; }
+        .modal-header { display: flex; gap: 25px; margin-bottom: 25px; }
+        .modal-poster { width: 200px; height: 300px; object-fit: cover; border-radius: 8px; flex-shrink: 0; }
+        .modal-info { flex: 1; }
+        .modal-title { font-size: 32px; margin-bottom: 10px; color: #9DD8FF; }
+        .modal-meta { color: #aaa; margin-bottom: 15px; font-size: 14px; }
+        .modal-overview { line-height: 1.8; margin-bottom: 20px; color: #ccc; }
+        
+        /* Buttons */
+        .action-btn { padding: 12px 24px; background: #9DD8FF; border: none; color: #000; border-radius: 5px; cursor: pointer; transition: all 0.3s; }
+        .action-btn:hover { background: #7ac5f5; }
+        .action-btn.secondary { background: #2a2a2a; color: #e0e0e0; }
+        .action-btn.secondary:hover { background: #3a3a3a; }
+        
+        /* Search Results */
+        .search-results { margin-top: 20px; max-height: 400px; overflow-y: auto; }
+        .search-result-item { background: #1a1a1a; padding: 15px; margin-bottom: 10px; border-radius: 8px; display: flex; gap: 15px; align-items: center; cursor: pointer; transition: background 0.3s; }
+        .search-result-item:hover { background: #2a2a2a; }
+        .search-result-poster { width: 60px; height: 90px; object-fit: cover; border-radius: 5px; flex-shrink: 0; }
+        .search-result-info { flex: 1; min-width: 0; }
+        .search-result-title { font-weight: bold; margin-bottom: 5px; }
+        .search-result-meta { font-size: 13px; color: #999; }
+        
+        /* Settings */
+        .settings-section { background: #1a1a1a; padding: 25px; border-radius: 8px; margin-bottom: 20px; }
+        .settings-title { font-size: 20px; margin-bottom: 20px; color: #9DD8FF; }
+        .form-group { margin-bottom: 20px; }
+        .form-label { display: block; margin-bottom: 8px; color: #ccc; font-size: 14px; }
+        .form-input { width: 100%; padding: 12px; background: #0f0f0f; border: 1px solid #333; color: #e0e0e0; border-radius: 5px; font-size: 14px; }
+        .form-input:focus { outline: none; border-color: #9DD8FF; }
+        .folder-list { margin-top: 10px; }
+        .folder-item { background: #0f0f0f; padding: 10px 15px; margin-bottom: 8px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+        .remove-btn { padding: 5px 12px; background: #ff6b6b; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; flex-shrink: 0; }
+        .remove-btn:hover { background: #ff5252; }
+        
+        /* Utility Classes */
+        .loading { text-align: center; padding: 50px; font-size: 18px; color: #999; }
+        .error { text-align: center; padding: 50px; color: #ff6b6b; }
+        .success { text-align: center; padding: 50px; color: #4caf50; }
+        .empty-state { text-align: center; padding: 80px 20px; }
+        .empty-state-icon { font-size: 64px; margin-bottom: 20px; opacity: 0.5; }
+        .empty-state-text { font-size: 18px; color: #999; margin-bottom: 20px; }
+        video { width: 100%; max-height: 500px; background: #000; border-radius: 8px; margin-top: 20px; }
+        
+        /* Progress Indicator */
+        .progress-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 2000; align-items: center; justify-content: center; }
+        .progress-overlay.active { display: flex; }
+        .progress-container { background: #1a1a1a; padding: 30px; border-radius: 12px; max-width: 500px; width: 90%; }
+        .progress-title { font-size: 24px; color: #9DD8FF; margin-bottom: 20px; text-align: center; }
+        .progress-bar-container { background: #0f0f0f; height: 30px; border-radius: 15px; overflow: hidden; margin-bottom: 15px; }
+        .progress-bar { height: 100%; background: linear-gradient(90deg, #9DD8FF, #7ac5f5); transition: width 0.3s ease; display: flex; align-items: center; justify-content: center; font-weight: bold; color: #000; }
+        .progress-info { color: #ccc; margin-bottom: 10px; }
+        .progress-item { color: #999; font-size: 14px; font-style: italic; }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .modal-header { flex-direction: column; }
+            .modal-poster { width: 100%; height: auto; max-height: 400px; }
+            .search-bar { flex-direction: column; }
+            .search-input { min-width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">🎬 Streamlet Connector</div>
+        <div class="nav">
+            <button class="nav-btn active" onclick="showPage('database')">Databáze</button>
+            <button class="nav-btn" onclick="showPage('settings')">Nastavení</button>
+        </div>
+    </div>
+    
+    <div class="container">
+        <!-- Database Page -->
+        <div id="database" class="page active">
+            <div class="search-bar">
+                <input type="text" class="search-input" id="searchInput" placeholder="Hledat v databázi..." onkeyup="filterItems()">
+                <button class="filter-btn active" data-filter="all" onclick="setFilter('all')">Vše</button>
+                <button class="filter-btn" data-filter="movie" onclick="setFilter('movie')">Filmy</button>
+                <button class="filter-btn" data-filter="tv_show" onclick="setFilter('tv_show')">Seriály</button>
+                <button class="filter-btn" data-filter="no-metadata" onclick="setFilter('no-metadata')">Bez metadat</button>
+            </div>
+            <div id="itemsGrid" class="grid">
+                <div class="loading">Načítám databázi...</div>
+            </div>
+        </div>
+        
+        <!-- Settings Page -->
+        <div id="settings" class="page">
+            <div class="settings-section">
+                <h2 class="settings-title">TMDB Nastavení</h2>
+                <div class="form-group">
+                    <label class="form-label">API Klíč</label>
+                    <input type="text" class="form-input" id="apiKeyInput" placeholder="Váš TMDB API klíč">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Jazyk</label>
+                    <select class="form-input" id="languageSelect">
+                        <option value="cs-CZ">Čeština</option>
+                        <option value="en-US">English</option>
+                        <option value="sk-SK">Slovenčina</option>
+                        <option value="de-DE">Deutsch</option>
+                        <option value="fr-FR">Français</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="settings-section">
+                <h2 class="settings-title">Složky ke skenování</h2>
+                <div class="form-group">
+                    <label class="form-label">Přidat složku</label>
+                    <div style="display: flex; gap: 10px;">
+                        <input type="text" class="form-input" id="folderInput" placeholder="Cesta ke složce (např. /mnt/movies)">
+                        <button class="action-btn" onclick="addFolder()">Přidat</button>
+                    </div>
+                </div>
+                <div id="folderList" class="folder-list"></div>
+                <button class="action-btn" onclick="startScan()" style="margin-top: 20px;">🔍 Spustit skenování</button>
+            </div>
+            
+            <div class="settings-section">
+                <h2 class="settings-title" style="color: #ff6b6b;">Nebezpečná zóna</h2>
+                <p style="color: #999; margin-bottom: 15px; font-size: 14px;">Tyto akce jsou nevratné!</p>
+                <button class="action-btn secondary" onclick="clearDatabase()" style="background: #ff6b6b; color: #fff;">🗑️ Smazat celou databázi a obrázky</button>
+            </div>
+            
+            <button class="action-btn" onclick="saveSettings()" style="margin-top: 20px;">💾 Uložit nastavení</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Item Detail Modal -->
+    <div id="itemModal" class="modal">
+        <div class="modal-content">
+            <span class="close-btn" onclick="closeModal()">&times;</span>
+            <div id="modalContent"></div>
+        </div>
+    </div>
+    
+    <!-- TMDB Search Modal -->
+    <div id="searchModal" class="modal">
+        <div class="modal-content">
+            <span class="close-btn" onclick="closeSearchModal()">&times;</span>
+            <h2 style="margin-bottom: 20px; color: #9DD8FF;">Přiřadit metadata z TMDB</h2>
+            <div id="assignWarning"></div>
+            <div style="margin-bottom: 15px;">
+                <p style="color: #ccc; margin-bottom: 10px;">Soubor: <strong id="assignFileName"></strong></p>
+                <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
+                    <input type="text" class="form-input" id="tmdbSearchInput" placeholder="Hledat film/seriál..." style="flex: 1; min-width: 200px;">
+                    <button class="filter-btn active" id="searchTypeMovie" onclick="setSearchType('movie')">Film</button>
+                    <button class="filter-btn" id="searchTypeTV" onclick="setSearchType('tv')">Seriál</button>
+                    <button class="action-btn" onclick="searchTMDB()">Hledat</button>
+                </div>
+            </div>
+            <div id="searchResults" class="search-results"></div>
+        </div>
+    </div>
+    
+    <!-- Progress Indicator -->
+    <div id="progressOverlay" class="progress-overlay">
+        <div class="progress-container">
+            <div class="progress-title">⏳ Probíhá zpracování...</div>
+            <div class="progress-bar-container">
+                <div id="progressBar" class="progress-bar" style="width: 0%;">0%</div>
+            </div>
+            <div id="progressInfo" class="progress-info">Inicializace...</div>
+            <div id="progressItem" class="progress-item"></div>
+        </div>
+    </div>
+    
+    <script>
+        let allItems = [];
+        let currentFilter = 'all';
+        let currentSearchTerm = '';
+        let currentAssignItem = null;
+        let currentSearchType = 'movie';
+        let settings = {};
+        
+        // ========== Initialization ==========
+        async function init() {
+            await loadSettings();
+            await loadItems();
+        }
+        
+        // ========== Settings ==========
+        async function loadSettings() {
+            try {
+                const response = await fetch('/api/settings');
+                settings = await response.json();
+                document.getElementById('apiKeyInput').value = settings.tmdb_api_key || '';
+                document.getElementById('languageSelect').value = settings.tmdb_language || 'cs-CZ';
+                renderFolderList();
+            } catch (error) {
+                console.error('Error loading settings:', error);
+            }
+        }
+        
+        async function saveSettings() {
+            settings.tmdb_api_key = document.getElementById('apiKeyInput').value;
+            settings.tmdb_language = document.getElementById('languageSelect').value;
+            
+            try {
+                const response = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(settings)
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    alert('✓ Nastavení uloženo!');
+                } else {
+                    alert('✗ Chyba: ' + (result.error || 'Neznámá chyba'));
+                }
+            } catch (error) {
+                alert('✗ Chyba: ' + error.message);
+            }
+        }
+        
+        function renderFolderList() {
+            const list = document.getElementById('folderList');
+            if (!settings.folders_to_scan || settings.folders_to_scan.length === 0) {
+                list.innerHTML = '<div class="empty-state-text" style="padding: 20px 0;">Žádné složky</div>';
+                return;
+            }
+            
+            list.innerHTML = settings.folders_to_scan.map((folder, idx) => `
+                <div class="folder-item">
+                    <span style="overflow: hidden; text-overflow: ellipsis;">${folder}</span>
+                    <button class="remove-btn" onclick="removeFolder(${idx})">Odebrat</button>
+                </div>
+            `).join('');
+        }
+        
+        function addFolder() {
+            const input = document.getElementById('folderInput');
+            const folder = input.value.trim();
+            if (!folder) return;
+            
+            if (!settings.folders_to_scan) settings.folders_to_scan = [];
+            if (settings.folders_to_scan.includes(folder)) {
+                alert('Složka již existuje');
+                return;
+            }
+            
+            settings.folders_to_scan.push(folder);
+            renderFolderList();
+            input.value = '';
+        }
+        
+        function removeFolder(idx) {
+            settings.folders_to_scan.splice(idx, 1);
+            renderFolderList();
+        }
+        
+        async function startScan() {
+            if (!settings.folders_to_scan || settings.folders_to_scan.length === 0) {
+                alert('Nejprve přidejte složky ke skenování');
+                return;
+            }
+            
+            if (!confirm('Spustit skenování vybraných složek?')) return;
+            
+            // Show progress overlay
+            showProgress();
+            
+            // Start polling for progress
+            const progressInterval = setInterval(async () => {
+                try {
+                    const response = await fetch('/api/progress');
+                    const progress = await response.json();
+                    updateProgress(progress);
+                    
+                    if (!progress.active) {
+                        clearInterval(progressInterval);
+                    }
+                } catch (error) {
+                    console.error('Error fetching progress:', error);
+                }
+            }, 500);
+            
+            try {
+                const response = await fetch('/api/scan', { method: 'POST' });
+                const result = await response.json();
+                
+                // Wait a bit for final progress update
+                setTimeout(() => {
+                    clearInterval(progressInterval);
+                    hideProgress();
+                    
+                    if (result.success) {
+                        const removedMsg = result.removed_items > 0 ? `\nOdstraněno: ${result.removed_items}` : '';
+                        alert(`✓ Skenování dokončeno!\n\nNalezeno: ${result.total_found}\nNových: ${result.new_items}${removedMsg}`);
+                        loadItems();
+                    } else {
+                        alert('✗ Chyba: ' + (result.error || 'Neznámá chyba'));
+                    }
+                }, 1000);
+            } catch (error) {
+                clearInterval(progressInterval);
+                hideProgress();
+                alert('✗ Chyba: ' + error.message);
+            }
+        }
+        
+        function showProgress() {
+            document.getElementById('progressOverlay').classList.add('active');
+        }
+        
+        function hideProgress() {
+            document.getElementById('progressOverlay').classList.remove('active');
+        }
+        
+        function updateProgress(progress) {
+            const progressBar = document.getElementById('progressBar');
+            const progressInfo = document.getElementById('progressInfo');
+            const progressItem = document.getElementById('progressItem');
+            
+            let percentage = 0;
+            if (progress.total > 0) {
+                percentage = Math.round((progress.current / progress.total) * 100);
+            }
+            
+            progressBar.style.width = percentage + '%';
+            progressBar.textContent = percentage + '%';
+            
+            let stageText = '';
+            // Use custom message if available
+            if (progress.message && progress.message.startsWith('Stahuji')) {
+                stageText = progress.message;
+            } else {
+                switch (progress.stage) {
+                    case 'scanning':
+                        stageText = 'Skenování složek';
+                        break;
+                    case 'tmdb':
+                        stageText = 'Získávání metadat a obrázků z TMDB';
+                        break;
+                    default:
+                        stageText = progress.message || 'Zpracování';
+                }
+            }
+            
+            progressInfo.textContent = stageText + (progress.total > 0 ? ` (${progress.current}/${progress.total})` : '');
+            progressItem.textContent = progress.current_item || '';
+        }
+        
+        async function clearDatabase() {
+            if (!confirm('⚠️ VAROVÁNÍ ⚠️\n\nTímto smažete CELOU databázi včetně všech obrázků!\n\nOpravdu chcete pokračovat?')) return;
+            if (!confirm('Toto je NEVRATNÉ! Jste si opravdu jisti?')) return;
+            
+            try {
+                const response = await fetch('/api/database/clear', { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert('✓ Databáze byla smazána');
+                    await loadItems();
+                } else {
+                    alert('✗ Chyba: ' + (result.error || 'Neznámá chyba'));
+                }
+            } catch (error) {
+                alert('✗ Chyba: ' + error.message);
+            }
+        }
+        
+        // ========== Items ==========
+        async function loadItems() {
+            try {
+                const response = await fetch('/api/items');
+                allItems = await response.json();
+                renderItems();
+            } catch (error) {
+                document.getElementById('itemsGrid').innerHTML = '<div class="error">Chyba při načítání: ' + error.message + '</div>';
+            }
+        }
+        
+        function renderItems() {
+            const filtered = allItems.filter(item => {
+                if (currentFilter === 'movie' && item.type !== 'movie') return false;
+                if (currentFilter === 'tv_show' && item.type !== 'tv_show') return false;
+                if (currentFilter === 'no-metadata' && item.has_metadata) return false;
+                
+                if (currentSearchTerm) {
+                    const searchLower = currentSearchTerm.toLowerCase();
+                    const title = (item.display_title || '').toLowerCase();
+                    const path = (item.path || '').toLowerCase();
+                    if (!title.includes(searchLower) && !path.includes(searchLower)) return false;
+                }
+                
+                return true;
+            });
+            
+            const grid = document.getElementById('itemsGrid');
+            if (filtered.length === 0) {
+                grid.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📂</div><div class="empty-state-text">Žádné položky</div></div>';
+                return;
+            }
+            
+            grid.innerHTML = filtered.map(item => {
+                const badge = !item.has_metadata ? '<div class="card-badge">Bez dat</div>' : '';
+                const cardClass = item.has_metadata ? '' : ' no-metadata';
+                
+                let posterHtml;
+                if (item.poster) {
+                    const posterUrl = item.poster.startsWith('http') ? item.poster : `/api/images/${item.poster}`;
+                    posterHtml = `<img src="${posterUrl}" alt="${item.display_title}">`;
+                } else {
+                    posterHtml = '<div style="width: 100%; height: 300px; background: #2a2a2a;"></div>';
+                }
+                
+                return `
+                    <div class="card${cardClass}" onclick="showItemDetail(${item.internal_id})">
+                        ${badge}
+                        ${posterHtml}
+                        <div class="card-info">
+                            <div class="card-title">${item.display_title}</div>
+                            <div class="card-meta">
+                                <span>${item.year || item.type || ''}</span>
+                                ${item.rating ? `<span class="rating">⭐ ${item.rating.toFixed(1)}</span>` : ''}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        function filterItems() {
+            currentSearchTerm = document.getElementById('searchInput').value;
+            renderItems();
+        }
+        
+        function setFilter(filter) {
+            currentFilter = filter;
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.filter === filter || btn.textContent.toLowerCase().includes(filter.replace('-', ' ')));
+            });
+            renderItems();
+        }
+        
+        // ========== Item Detail ==========
+        function showItemDetail(internalId) {
+            const item = allItems.find(i => i.internal_id === internalId);
+            if (!item) return;
+            
+            let content = '';
+            if (item.has_metadata) {
+                let posterHtml;
+                if (item.poster) {
+                    const posterUrl = item.poster.startsWith('http') ? item.poster : `/api/images/${item.poster}`;
+                    posterHtml = `<img class="modal-poster" src="${posterUrl}" alt="${item.display_title}">`;
+                } else {
+                    posterHtml = '<div class="modal-poster" style="background: #2a2a2a;"></div>';
+                }
+                
+                content = `
+                    <div class="modal-header">
+                        ${posterHtml}
+                        <div class="modal-info">
+                            <h2 class="modal-title">${item.display_title}</h2>
+                            <div class="modal-meta">${item.year || ''} • ${item.rating ? '⭐ ' + item.rating.toFixed(1) : ''}</div>
+                            <div class="modal-overview">${item.overview || 'Žádný popis'}</div>
+                            <button class="action-btn" onclick="playStream(${item.internal_id})">▶ Přehrát</button>
+                            <button class="action-btn secondary" onclick="downloadStream(${item.internal_id})">⬇ Stáhnout</button>
+                            <button class="action-btn secondary" onclick="assignMetadata(${item.internal_id})" style="background: #ff9800; color: #fff;">🔄 Změnit metadata TMDB</button>
+                        </div>
+                    </div>
+                    <div id="videoPlayer"></div>
+                    <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #333; color: #999; font-size: 13px; word-break: break-all;">
+                        <strong>Soubor:</strong> ${item.path}
+                    </div>
+                `;
+            } else {
+                content = `
+                    <div style="text-align: center; padding: 40px;">
+                        <div style="font-size: 64px; margin-bottom: 20px;">❓</div>
+                        <h2 style="color: #9DD8FF; margin-bottom: 15px;">Položka bez metadat</h2>
+                        <p style="color: #ccc; margin-bottom: 25px; font-size: 14px; word-break: break-all;">${item.path}</p>
+                        <button class="action-btn" onclick="assignMetadata(${item.internal_id})">🔍 Přiřadit metadata z TMDB</button>
+                    </div>
+                `;
+            }
+            
+            document.getElementById('modalContent').innerHTML = content;
+            document.getElementById('itemModal').classList.add('active');
+        }
+        
+        function playStream(internalId) {
+            document.getElementById('videoPlayer').innerHTML = `
+                <video controls autoplay>
+                    <source src="/api/stream/${internalId}" type="video/mp4">
+                    Váš prohlížeč nepodporuje přehrávání videa.
+                </video>`;
+        }
+        
+        function downloadStream(internalId) {
+            window.location.href = `/api/stream/${internalId}`;
+        }
+        
+        // ========== TMDB Assignment ==========
+        function assignMetadata(internalId) {
+            currentAssignItem = allItems.find(i => i.internal_id === internalId);
+            if (!currentAssignItem) {
+                console.error('Item not found:', internalId);
+                return;
+            }
+            
+            console.log('Assigning metadata for item:', currentAssignItem);
+            
+            // Close detail modal first
+            closeModal();
+            
+            // Use setTimeout to ensure modal is closed before opening search modal
+            setTimeout(() => {
+                // Set search type based on item type
+                if (currentAssignItem.type === 'tv_show') {
+                    currentSearchType = 'tv';
+                } else {
+                    currentSearchType = 'movie';
+                }
+                
+                console.log('Search type set to:', currentSearchType);
+                
+                // Update modal title and warning based on whether item has metadata
+                const modalTitle = document.querySelector('#searchModal h2');
+                const warningDiv = document.getElementById('assignWarning');
+                
+                if (!modalTitle || !warningDiv) {
+                    console.error('Modal elements not found!');
+                    return;
+                }
+                
+                if (currentAssignItem.has_metadata) {
+                    modalTitle.textContent = 'Změnit metadata z TMDB';
+                    warningDiv.innerHTML = '<div style="background: #ff9800; color: #000; padding: 12px; border-radius: 5px; margin-bottom: 15px; font-weight: bold;">⚠️ Pozor: Stávající metadata budou nahrazena!</div>';
+                } else {
+                    modalTitle.textContent = 'Přiřadit metadata z TMDB';
+                    warningDiv.innerHTML = '';
+                }
+                
+                // Set the input value and update search type buttons
+                const searchValue = currentAssignItem.display_title || currentAssignItem.title || '';
+                document.getElementById('assignFileName').textContent = searchValue || currentAssignItem.path;
+                document.getElementById('tmdbSearchInput').value = searchValue;
+                document.getElementById('searchResults').innerHTML = '';
+                
+                // Update search type buttons
+                document.getElementById('searchTypeMovie').classList.toggle('active', currentSearchType === 'movie');
+                document.getElementById('searchTypeTV').classList.toggle('active', currentSearchType === 'tv');
+                
+                console.log('Opening search modal...');
+                document.getElementById('searchModal').classList.add('active');
+            }, 100);
+        }
+        
+        async function searchTMDB() {
+            const query = document.getElementById('tmdbSearchInput').value.trim();
+            if (!query) return;
+            
+            const resultsDiv = document.getElementById('searchResults');
+            resultsDiv.innerHTML = '<div class="loading">Hledám...</div>';
+            
+            try {
+                const response = await fetch(`/api/search?query=${encodeURIComponent(query)}&type=${currentSearchType}`);
+                const results = await response.json();
+                
+                if (results.error) {
+                    resultsDiv.innerHTML = '<div class="error">' + results.error + '</div>';
+                    return;
+                }
+                
+                if (results.length === 0) {
+                    resultsDiv.innerHTML = '<div class="empty-state"><div class="empty-state-text">Žádné výsledky</div></div>';
+                    return;
+                }
+                
+                resultsDiv.innerHTML = results.map(result => {
+                    let posterHtml;
+                    if (result.poster_path) {
+                        posterHtml = `<img class="search-result-poster" src="https://image.tmdb.org/t/p/w92${result.poster_path}" alt="${result.title}">`;
+                    } else {
+                        posterHtml = '<div class="search-result-poster" style="background: #2a2a2a;"></div>';
+                    }
+                    
+                    return `
+                        <div class="search-result-item" onclick="selectTMDBResult(${result.tmdb_id})">
+                            ${posterHtml}
+                            <div class="search-result-info">
+                                <div class="search-result-title">${result.title}</div>
+                                <div class="search-result-meta">
+                                    ${result.year} • ${result.rating ? '⭐ ' + result.rating.toFixed(1) : 'N/A'}
+                                    <br><small style="color: #777;">${result.overview ? result.overview.substring(0, 100) + '...' : 'Bez popisu'}</small>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (error) {
+                resultsDiv.innerHTML = '<div class="error">Chyba: ' + error.message + '</div>';
+            }
+        }
+        
+        async function selectTMDBResult(tmdbId) {
+            if (!currentAssignItem) return;
+            
+            // Confirm if replacing existing metadata
+            if (currentAssignItem.has_metadata) {
+                if (!confirm('⚠️ Opravdu chcete nahradit stávající metadata?\n\nStávající informace a obrázky budou smazány a nahrazeny novými daty z TMDB.')) {
+                    return;
+                }
+            }
+            
+            try {
+                const response = await fetch('/api/assign-metadata', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        internal_id: currentAssignItem.internal_id,
+                        tmdb_id: tmdbId,
+                        type: currentSearchType
+                    })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    closeSearchModal();
+                    await loadItems();
+                    alert('✓ Metadata úspěšně přiřazena!');
+                } else {
+                    alert('✗ Chyba: ' + (result.error || 'Neznámá chyba'));
+                }
+            } catch (error) {
+                alert('✗ Chyba: ' + error.message);
+            }
+        }
+        
+        function setSearchType(type) {
+            currentSearchType = type;
+            document.getElementById('searchTypeMovie').classList.toggle('active', type === 'movie');
+            document.getElementById('searchTypeTV').classList.toggle('active', type === 'tv');
+        }
+        
+        // ========== Navigation ==========
+        function showPage(page) {
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById(page).classList.add('active');
+            event.target.classList.add('active');
+        }
+        
+        // ========== Modal Controls ==========
+        function closeModal() {
+            document.getElementById('itemModal').classList.remove('active');
+            const videoPlayer = document.getElementById('videoPlayer');
+            if (videoPlayer) {
+                videoPlayer.innerHTML = '';
+            }
+        }
+        
+        function closeSearchModal() {
+            document.getElementById('searchModal').classList.remove('active');
+            currentAssignItem = null;
+        }
+        
+        // Close modals on background click
+        document.getElementById('itemModal').addEventListener('click', e => {
+            if (e.target.id === 'itemModal') closeModal();
+        });
+        document.getElementById('searchModal').addEventListener('click', e => {
+            if (e.target.id === 'searchModal') closeSearchModal();
+        });
+        
+        // ENTER key support for search
+        document.getElementById('tmdbSearchInput').addEventListener('keypress', e => {
+            if (e.key === 'Enter') searchTMDB();
+        });
+        
+        // Initialize on load
+        init();
+    </script>
+</body>
+</html>
