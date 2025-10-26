@@ -47,6 +47,7 @@ class CustomAPI:
                 'folders_to_scan': [],
                 'tmdb_api_key': '',
                 'tmdb_language': 'cs-CZ',
+                'custom_api_url': '',
                 'scan_interval': 3600
             }
     
@@ -63,11 +64,15 @@ class CustomAPI:
             return False
 
     def _get_image_url(self, local_path: str) -> Optional[str]:
-        """Convert absolute local image path to URL path."""
+        """Convert local image filename to URL path."""
         if not local_path:
             return None
         
-        # Extract just the filename from absolute path
+        # If it already starts with /, it's a TMDB path that wasn't downloaded - skip it
+        if local_path.startswith('/'):
+            return None
+        
+        # Extract just the filename from absolute path (legacy compatibility)
         filename = os.path.basename(local_path)
         return filename
 
@@ -100,8 +105,8 @@ class CustomAPI:
                     item_data.update({
                         'tmdb_id': metadata.get('id'),
                         'display_title': metadata.get('title') or metadata.get('name', item_data['title']),
-                        'poster': self._get_image_url(item.get('local_poster_path')),
-                        'backdrop': self._get_image_url(item.get('local_backdrop_path')),
+                        'poster_path': self._get_image_url(metadata.get('poster_path')),
+                        'backdrop_path': self._get_image_url(metadata.get('backdrop_path')),
                         'rating': metadata.get('vote_average', 0),
                         'year': (metadata.get('release_date') or metadata.get('first_air_date', ''))[:4],
                         'overview': metadata.get('overview', '')
@@ -113,11 +118,11 @@ class CustomAPI:
             
             return jsonify(items), 200
         
-        # ========== API: TMDB SEARCH ==========
+        # ========== API: LOCAL SEARCH ==========
         @self.app.route('/api/search', methods=['GET'])
-        def search_tmdb():
-            """Search TMDB for movies or TV shows."""
-            query = request.args.get('query', '').strip()
+        def search_local():
+            """Search local database for movies or TV shows."""
+            query = request.args.get('query', '').strip().lower()
             media_type = request.args.get('type', 'movie')  # 'movie' or 'tv'
             
             if not query:
@@ -127,24 +132,30 @@ class CustomAPI:
                 return jsonify({'error': 'Type must be movie or tv'}), 400
             
             try:
-                if media_type == 'movie':
-                    results = self.tmdb_client.search_movies(query, limit=10)
-                else:
-                    results = self.tmdb_client.search_tv_shows(query, limit=10)
-
-                # Format results
-                formatted = []
-                for result in results[:10]:  # Limit to 10 results
-                    formatted.append({
-                        'tmdb_id': result.get('id'),
-                        'title': result.get('title') or result.get('name'),
-                        'year': (result.get('release_date') or result.get('first_air_date', ''))[:4] if (result.get('release_date') or result.get('first_air_date')) else '',
-                        'overview': result.get('overview', ''),
-                        'poster_path': result.get('poster_path'),
-                        'rating': result.get('vote_average', 0)
-                    })
-
-                return jsonify(formatted), 200
+                results = []
+                target_type = 'movie' if media_type == 'movie' else 'tv_show'
+                
+                for item in self.database.get_all_items():
+                    if item.get('type') != target_type or 'metadata' not in item:
+                        continue
+                    
+                    metadata = item['metadata']
+                    title = (metadata.get('title') or metadata.get('name', '')).lower()
+                    overview = (metadata.get('overview', '')).lower()
+                    
+                    # Search in title and overview
+                    if query in title or query in overview:
+                        results.append({
+                            'id': metadata.get('id'),
+                            'title': metadata.get('title') or metadata.get('name'),
+                            'year': (metadata.get('release_date') or metadata.get('first_air_date', ''))[:4],
+                            'overview': metadata.get('overview', ''),
+                            'poster_path': self._get_image_url(metadata.get('poster_path')),
+                            'rating': metadata.get('vote_average', 0)
+                        })
+                
+                # Limit to 10 results
+                return jsonify(results[:10]), 200
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
         
@@ -216,6 +227,8 @@ class CustomAPI:
             if 'tmdb_language' in data:
                 self.config['tmdb_language'] = data['tmdb_language']
                 self.tmdb_client.language = data['tmdb_language']
+            if 'custom_api_url' in data:
+                self.config['custom_api_url'] = data['custom_api_url']
             if 'scan_interval' in data:
                 self.config['scan_interval'] = data['scan_interval']
             
@@ -312,7 +325,7 @@ class CustomAPI:
             except Exception as e:
                 return jsonify({'error': 'Image not found'}), 404
         
-        # ========== API: LEGACY ENDPOINTS (kept for compatibility) ==========
+        # ========== API: MOVIES ==========
         @self.app.route('/api/movies', methods=['GET'])
         def get_movies():
             """Get all movies with basic info: id, title, poster, rating."""
@@ -323,11 +336,12 @@ class CustomAPI:
                     movies.append({
                         'id': metadata.get('id'),
                         'title': metadata.get('title', item.get('title', 'Unknown')),
-                        'poster': item.get('local_poster_path') or metadata.get('poster_path'),
+                        'poster_path': self._get_image_url(metadata.get('poster_path')),
                         'rating': metadata.get('vote_average', 0)
                     })
             return jsonify(movies), 200
 
+        # ========== API: TV SHOWS ==========
         @self.app.route('/api/tv-shows', methods=['GET'])
         def get_tv_shows():
             """Get all TV shows with basic info: id, title, poster, rating."""
@@ -338,11 +352,12 @@ class CustomAPI:
                     tv_shows.append({
                         'id': metadata.get('id'),
                         'title': metadata.get('name', item.get('title', 'Unknown')),
-                        'poster': item.get('local_poster_path') or metadata.get('poster_path'),
+                        'poster_path': self._get_image_url(metadata.get('poster_path')),
                         'rating': metadata.get('vote_average', 0)
                     })
             return jsonify(tv_shows), 200
 
+        # ========== API: MOVIE DETAIL ==========
         @self.app.route('/api/movie/<int:tmdb_id>', methods=['GET'])
         def get_movie_details(tmdb_id):
             """Get complete movie details by TMDB ID."""
@@ -350,9 +365,7 @@ class CustomAPI:
                 if item.get('type') == 'movie' and 'metadata' in item:
                     if item['metadata'].get('id') == tmdb_id:
                         result = item['metadata'].copy()
-                        # Add local paths and file info
-                        result['local_poster_path'] = item.get('local_poster_path')
-                        result['local_backdrop_path'] = item.get('local_backdrop_path')
+                        # Add file info
                         result['file_path'] = item.get('path')
                         result['year'] = item.get('year')
                         # Add internal ID for stream access
@@ -360,6 +373,7 @@ class CustomAPI:
                         return jsonify(result), 200
             return jsonify({'error': 'Movie not found'}), 404
 
+        # ========== API: SERIES DETAIL ==========
         @self.app.route('/api/tv-show/<int:tmdb_id>', methods=['GET'])
         def get_tv_show_details(tmdb_id):
             """Get complete TV show details by TMDB ID."""
@@ -367,9 +381,7 @@ class CustomAPI:
                 if item.get('type') == 'tv_show' and 'metadata' in item:
                     if item['metadata'].get('id') == tmdb_id:
                         result = item['metadata'].copy()
-                        # Add local paths and file info
-                        result['local_poster_path'] = item.get('local_poster_path')
-                        result['local_backdrop_path'] = item.get('local_backdrop_path')
+                        # Add file info
                         result['file_path'] = item.get('path')
                         result['seasons'] = item.get('seasons', [])
                         # Add internal ID for stream access
@@ -377,6 +389,7 @@ class CustomAPI:
                         return jsonify(result), 200
             return jsonify({'error': 'TV show not found'}), 404
 
+        # ========== API: SERIES EPISODE DETAIL ==========
         @self.app.route('/api/tv-show/<int:tmdb_id>/season/<int:season_number>/episode/<int:episode_number>', methods=['GET'])
         def get_tv_episode_details(tmdb_id, season_number, episode_number):
             """Get details about a specific TV episode (mirrors TMDB style), augmented with local file info if available."""
@@ -411,6 +424,7 @@ class CustomAPI:
                 return jsonify({'error': 'Episode not found'}), 404
             return jsonify(response_data), 200
 
+        # ========== API: SERIES SEASON DETAIL ==========
         @self.app.route('/api/tv-show/<int:tmdb_id>/season/<int:season_number>', methods=['GET'])
         @self.app.route('/api/tv/<int:tmdb_id>/season/<int:season_number>', methods=['GET'])
         def get_tv_season(tmdb_id, season_number):
@@ -446,13 +460,14 @@ class CustomAPI:
                             if name_local:
                                 ep['name'] = name_local
                             # Attach local still if available
-                            if lep.get('local_still_path'):
-                                ep['local_still_path'] = lep.get('local_still_path')
+                            if lep.get('still_path'):
+                                ep['still_path'] = lep.get('still_path')
 
                 return jsonify({ 'episodes': episodes }), 200
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
 
+        # ========== API: SERIES STREAM DETAIL ==========
         @self.app.route('/api/tv-show/<int:tmdb_id>/season/<int:season_number>/episode/<int:episode_number>/stream', methods=['GET'])
         @self.app.route('/api/tv/<int:tmdb_id>/season/<int:season_number>/episode/<int:episode_number>/stream', methods=['GET'])
         def stream_tv_episode(tmdb_id, season_number, episode_number):
@@ -472,67 +487,70 @@ class CustomAPI:
             except Exception as e:
                 return jsonify({'error': f'Failed to send file: {str(e)}'}), 500
 
+        # ========== API: STREAMS ==========
         @self.app.route('/api/streams', methods=['GET'])
         def get_streams():
-            """Get list of all video files (streams) with ID, name, type, size."""
+            """Get list of all video files (streams) with TMDB ID, name, type, size."""
             streams = []
-            for idx, item in enumerate(self.database.get_all_items()):
+            for item in self.database.get_all_items():
                 file_path = item.get('path')
-                if file_path and os.path.exists(file_path):
-                    file_stat = os.stat(file_path)
-                    file_ext = os.path.splitext(file_path)[1].lower()
-                    streams.append({
-                        'id': idx,  # Internal ID
-                        'name': os.path.basename(file_path),
-                        'type': file_ext.replace('.', ''),
-                        'size': file_stat.st_size,
-                        'title': item.get('title', 'Unknown'),
-                        'media_type': item.get('type'),
-                        'tmdb_id': item.get('metadata', {}).get('id') if 'metadata' in item else None
-                    })
+                if file_path and os.path.exists(file_path) and 'metadata' in item:
+                    metadata = item['metadata']
+                    tmdb_id = metadata.get('id')
+                    if tmdb_id:
+                        file_stat = os.stat(file_path)
+                        file_ext = os.path.splitext(file_path)[1].lower()
+                        streams.append({
+                            'id': tmdb_id,  # TMDB ID
+                            'name': os.path.basename(file_path),
+                            'type': file_ext.replace('.', ''),
+                            'size': file_stat.st_size,
+                            'title': metadata.get('title') or metadata.get('name', 'Unknown'),
+                            'media_type': item.get('type')
+                        })
             return jsonify(streams), 200
 
-        @self.app.route('/api/stream/<int:stream_id>', methods=['GET'])
-        def get_stream_file(stream_id):
-            """Get direct link/file for stream by internal ID."""
-            items = self.database.get_all_items()
-            if stream_id < 0 or stream_id >= len(items):
-                return jsonify({'error': 'Stream not found'}), 404
+        # ========== API: STREAM BY TMDB ID ==========
+        @self.app.route('/api/stream/<int:tmdb_id>', methods=['GET'])
+        def get_stream_file(tmdb_id):
+            """Get direct link/file for stream by TMDB ID."""
+            for item in self.database.get_all_items():
+                if 'metadata' in item and item['metadata'].get('id') == tmdb_id:
+                    file_path = item.get('path')
+                    
+                    if not file_path or not os.path.exists(file_path):
+                        return jsonify({'error': 'File not found'}), 404
+                    
+                    try:
+                        # Return the actual file for streaming with Range support
+                        return self._send_partial_file(file_path)
+                    except Exception as e:
+                        return jsonify({'error': f'Failed to send file: {str(e)}'}), 500
             
-            item = items[stream_id]
-            file_path = item.get('path')
-            
-            if not file_path or not os.path.exists(file_path):
-                return jsonify({'error': 'File not found'}), 404
-            
-            try:
-                # Return the actual file for streaming with Range support
-                return self._send_partial_file(file_path)
-            except Exception as e:
-                return jsonify({'error': f'Failed to send file: {str(e)}'}), 500
+            return jsonify({'error': 'Stream not found'}), 404
 
-        @self.app.route('/api/stream/<int:stream_id>/info', methods=['GET'])
-        def get_stream_info(stream_id):
-            """Get stream file information without downloading."""
-            items = self.database.get_all_items()
-            if stream_id < 0 or stream_id >= len(items):
-                return jsonify({'error': 'Stream not found'}), 404
+        # ========== API: STREAM INFO ==========
+        @self.app.route('/api/stream/<int:tmdb_id>/info', methods=['GET'])
+        def get_stream_info(tmdb_id):
+            """Get stream file information by TMDB ID without downloading."""
+            for item in self.database.get_all_items():
+                if 'metadata' in item and item['metadata'].get('id') == tmdb_id:
+                    file_path = item.get('path')
+                    
+                    if not file_path or not os.path.exists(file_path):
+                        return jsonify({'error': 'File not found'}), 404
+                    
+                    file_stat = os.stat(file_path)
+                    return jsonify({
+                        'id': tmdb_id,
+                        'path': file_path,
+                        'name': os.path.basename(file_path),
+                        'type': os.path.splitext(file_path)[1].replace('.', ''),
+                        'size': file_stat.st_size,
+                        'url': f'{self.config['custom_api_url']}/api/stream/{tmdb_id}'
+                    }), 200
             
-            item = items[stream_id]
-            file_path = item.get('path')
-            
-            if not file_path or not os.path.exists(file_path):
-                return jsonify({'error': 'File not found'}), 404
-            
-            file_stat = os.stat(file_path)
-            return jsonify({
-                'id': stream_id,
-                'path': file_path,
-                'name': os.path.basename(file_path),
-                'type': os.path.splitext(file_path)[1].replace('.', ''),
-                'size': file_stat.st_size,
-                'url': f'/api/stream/{stream_id}'
-            }), 200
+            return jsonify({'error': 'Stream not found'}), 404
 
         @self.app.route('/api/health', methods=['GET'])
         def health_check():

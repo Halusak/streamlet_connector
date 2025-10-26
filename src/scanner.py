@@ -357,7 +357,7 @@ class MediaScanner:
                                             if still_path:
                                                 local_still = database.download_episode_still(still_path, show_id, int(s_no), int(e_no))
                                                 if local_still:
-                                                    ep['local_still_path'] = local_still
+                                                    ep['still_path'] = local_still
                                         # Save progressively to avoid losing progress on long scans
                                         database.add_or_update(item)
                                         database.save()

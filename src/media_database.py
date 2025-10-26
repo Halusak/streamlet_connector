@@ -37,22 +37,47 @@ class MediaDatabase:
             self.media_items = []
 
     def _migrate_image_paths(self):
-        """Migrate old absolute image paths to filenames."""
+        """Migrate old local_*_path fields to metadata.poster_path/backdrop_path."""
         migrated = False
         for item in self.media_items:
-            for key in ['local_poster_path', 'local_backdrop_path']:
-                if key in item and item[key]:
-                    path = item[key]
-                    # Check if it's an absolute path (old format)
-                    if os.path.isabs(path):
-                        # Convert to just filename
-                        filename = os.path.basename(path)
-                        item[key] = filename
-                        migrated = True
-                        print(f"[Database] Migrated {key}: {path} -> {filename}")
+            if 'metadata' not in item:
+                # Item without metadata - just remove old local paths
+                if 'local_poster_path' in item:
+                    del item['local_poster_path']
+                    migrated = True
+                if 'local_backdrop_path' in item:
+                    del item['local_backdrop_path']
+                    migrated = True
+                continue
+            
+            metadata = item['metadata']
+            
+            # Migrate local_poster_path to metadata.poster_path
+            if 'local_poster_path' in item and item['local_poster_path']:
+                old_path = item['local_poster_path']
+                # Extract filename if absolute path
+                filename = os.path.basename(old_path) if os.path.isabs(old_path) else old_path
+                # Replace TMDB path (starts with /) or set if missing
+                if metadata.get('poster_path', '').startswith('/') or not metadata.get('poster_path'):
+                    metadata['poster_path'] = filename
+                    migrated = True
+                del item['local_poster_path']
+                migrated = True
+            
+            # Migrate local_backdrop_path to metadata.backdrop_path
+            if 'local_backdrop_path' in item and item['local_backdrop_path']:
+                old_path = item['local_backdrop_path']
+                # Extract filename if absolute path
+                filename = os.path.basename(old_path) if os.path.isabs(old_path) else old_path
+                # Replace TMDB path (starts with /) or set if missing
+                if metadata.get('backdrop_path', '').startswith('/') or not metadata.get('backdrop_path'):
+                    metadata['backdrop_path'] = filename
+                    migrated = True
+                del item['local_backdrop_path']
+                migrated = True
         
         if migrated:
-            print(f"[Database] Migrated image paths to new format")
+            print(f"[Database] Migrated image paths to metadata format")
             self.save()
     
     def save(self):
@@ -177,7 +202,7 @@ class MediaDatabase:
             item: Media item dict with 'metadata' containing TMDB data
         
         Returns:
-            Updated item with local image paths
+            Updated item with local image paths stored directly in metadata
         """
         if 'metadata' not in item:
             return item
@@ -188,19 +213,21 @@ class MediaDatabase:
         if not tmdb_id:
             return item
 
-        # Download poster
+        # Download poster - replace TMDB path with local filename in metadata
         poster_path = metadata.get('poster_path')
-        if poster_path:
+        if poster_path and poster_path.startswith('/'):
+            # It's a TMDB path, download and replace
             local_poster = self.download_image(poster_path, tmdb_id, 'poster')
             if local_poster:
-                item['local_poster_path'] = local_poster
+                metadata['poster_path'] = local_poster
 
-        # Download backdrop
+        # Download backdrop - replace TMDB path with local filename in metadata
         backdrop_path = metadata.get('backdrop_path')
-        if backdrop_path:
+        if backdrop_path and backdrop_path.startswith('/'):
+            # It's a TMDB path, download and replace
             local_backdrop = self.download_image(backdrop_path, tmdb_id, 'backdrop')
             if local_backdrop:
-                item['local_backdrop_path'] = local_backdrop
+                metadata['backdrop_path'] = local_backdrop
 
         return item
 

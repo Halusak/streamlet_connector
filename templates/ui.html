@@ -450,9 +450,8 @@
                 const cardClass = item.has_metadata ? '' : ' no-metadata';
                 
                 let posterHtml;
-                if (item.poster) {
-                    const posterUrl = item.poster.startsWith('http') ? item.poster : `/api/images/${item.poster}`;
-                    posterHtml = `<img src="${posterUrl}" alt="${item.display_title}">`;
+                if (item.poster_path) {
+                    posterHtml = `<img src="/api/images/${item.poster_path}" alt="${item.display_title}">`;
                 } else {
                     posterHtml = '<div style="width: 100%; height: 300px; background: #2a2a2a;"></div>';
                 }
@@ -517,9 +516,8 @@
                 }
             } else if (item.has_metadata) {
                 let posterHtml;
-                if (item.poster) {
-                    const posterUrl = item.poster.startsWith('http') ? item.poster : `/api/images/${item.poster}`;
-                    posterHtml = `<img class="modal-poster" src="${posterUrl}" alt="${item.display_title}">`;
+                if (item.poster_path) {
+                    posterHtml = `<img class="modal-poster" src="/api/images/${item.poster_path}" alt="${item.display_title}">`;
                 } else {
                     posterHtml = '<div class="modal-poster" style="background: #2a2a2a;"></div>';
                 }
@@ -557,7 +555,7 @@
         }
 
         function renderTvShowDetails(details) {
-            const posterUrl = details.local_poster_path ? `/api/images/${details.local_poster_path}` : (details.poster_path ? `https://image.tmdb.org/t/p/w342${details.poster_path}` : null);
+            const posterUrl = details.poster_path ? `/api/images/${details.poster_path}` : null;
             const posterHtml = posterUrl ? `<img class="modal-poster" src="${posterUrl}" alt="${details.name || details.title}">` : '<div class="modal-poster" style="background: #2a2a2a;"></div>';
             const title = details.name || details.title || 'Seriál';
             const rating = details.vote_average ? `⭐ ${Number(details.vote_average).toFixed(1)}` : '';
@@ -619,7 +617,7 @@
                         const canPlay = ep.stream_available;
                         const playBtn = canPlay ? `<button class="action-btn" style="padding:6px 10px; font-size:12px;" onclick="playEpisode(${showId}, ${season.season}, ${epNum})">▶ Přehrát</button>` : '';
                         const fileNote = ep.filename ? `<span style="color:#777;">${ep.filename}</span>` : '';
-                        const stillUrl = ep.local_still_path ? `/api/images/${ep.local_still_path}` : (ep.still_path ? `https://image.tmdb.org/t/p/w185${ep.still_path}` : null);
+                        const stillUrl = ep.still_path ? `/api/images/${ep.still_path}` : null;
                         const stillHtml = stillUrl ? `<img src="${stillUrl}" alt="still" style="width:80px; height:45px; object-fit:cover; border-radius:4px;">` : '';
                         return `
                             <li style="padding: 6px 0; border-bottom: 1px solid #222; display:flex; justify-content:space-between; align-items:center; gap:12px;">
