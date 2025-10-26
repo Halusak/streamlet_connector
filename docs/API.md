@@ -1,367 +1,288 @@
-# Streamlet Connector API Documentation
+## Streamlet Connector — API dokumentace
+
+Tento dokument popisuje REST API implementované v `src/api.py` pro projekt Streamlet Connector.
+
+Obsah:
+- Přehled
+- Spuštění serveru
+- Základní URL
+- Endpoints (popis, parametry, příklady)
+- Datové struktury
+- Poznámky a omezení
 
 ## Přehled
 
-API poskytuje přístup k databázi filmů, seriálů a možnost streamování video souborů.
+API poskytuje tyto hlavní funkce:
+- Prohlížení lokální databáze mediálních souborů
+- Vyhledávání a přiřazování metadat z TMDB
+- Spuštění skenu složek pro nové mediální soubory
+- Servírování lokálních obrázků a videí
+- Základní webové UI dostupné na `/ui`
 
-**Base URL**: `http://localhost:5000/api`
+API je navrženo jako jednoduché REST rozhraní bez autentizace (lokální použití).
 
-## Spuštění API serveru
+## Spuštění serveru
 
-### Samostatný API server (bez UI)
-```bash
+Spuštění aplikace ze základního adresáře projektu (PowerShell):
+
+```powershell
 python run_api.py
 ```
 
-Nebo s vlastním hostem a portem:
-```bash
-python run_api.py --host 0.0.0.0 --port 8080
-```
+Po spuštění budou vypsány URL pro Web UI a API (výchozí: http://localhost:5000).
 
-### S GUI aplikací
-API se automaticky spustí při běhu aplikace v režimu GUI:
-```bash
-python main.py
-```
+## Základní URL
 
-### Background režim
-```bash
-python main.py --background
-```
+Veškeré endpointy začínají kořenem serveru, například:
+- Web UI: `/ui` nebo `/`
+- API root: `/api`
 
-## Endpointy
+Poznámka: V dokumentaci jsou uváděny relativní cesty (např. `/api/items`).
 
-### 1. Seznam všech filmů
-**GET** `/api/movies`
+## Endpoints
 
-Vrací seznam všech filmů se základními informacemi.
+Níže jsou endpointy se souhrnem, parametry a příklady.
 
-**Response:**
+### Web UI
+
+- GET /ui
+- GET /
+
+Popis: Vrátí jednoduché webové rozhraní (HTML). Šablona se načítá z `templates/ui.html`, pokud existuje, jinak se vrátí zabudované základní HTML.
+
+### Získání všech položek
+
+- GET /api/items
+
+Popis: Vrátí seznam všech mediálních položek známých databázi. Obsahuje i položky bez metadat.
+
+Response: 200 OK, JSON pole objektů s následujícími poli (přehled):
+- internal_id: interní index v paměti
+- path: absolutní cesta k souboru
+- title: název (souboru nebo extrahovaný)
+- display_title: název k zobrazení (z metadat nebo title)
+- type: 'movie' nebo 'tv_show' (může být None)
+- has_metadata: boolean
+- tmdb_id, poster, backdrop, rating, year, overview — pokud jsou metadata dostupná
+
+Příklad (skrácený):
+
 ```json
-[
-  {
-    "id": 550,
-    "title": "Fight Club",
-    "poster": "/path/to/poster.jpg",
-    "rating": 8.4
-  },
-  ...
-]
+[{
+	"internal_id": 0,
+	"path": "C:/media/Film.mp4",
+	"title": "Film",
+	"display_title": "Film (2020)",
+	"type": "movie",
+	"has_metadata": true,
+	"tmdb_id": 12345,
+	"poster": "poster.jpg",
+	"rating": 7.2
+}]
 ```
 
-**Pole:**
-- `id` (int): TMDB ID filmu
-- `title` (string): Název filmu
-- `poster` (string): Cesta k posteru (lokální nebo TMDB URL)
-- `rating` (float): Hodnocení 0-10
+### TMDB vyhledávání
 
----
+- GET /api/search
 
-### 2. Seznam všech seriálů
-**GET** `/api/tv-shows`
+Parametry (query string):
+- query (required): řetězec pro hledání
+- type (optional): 'movie' (default) nebo 'tv'
 
-Vrací seznam všech TV seriálů se základními informacemi.
+Popis: Vyhledá v TMDB filmy nebo seriály a vrátí až 10 výsledků.
 
-**Response:**
-```json
-[
-  {
-    "id": 1396,
-    "title": "Breaking Bad",
-    "poster": "/path/to/poster.jpg",
-    "rating": 9.2
-  },
-  ...
-]
+Příklad requestu:
+
+```
+GET /api/search?query=Inception&type=movie
 ```
 
-**Pole:**
-- `id` (int): TMDB ID seriálu
-- `title` (string): Název seriálu
-- `poster` (string): Cesta k posteru
-- `rating` (float): Hodnocení 0-10
+Odpověď: 200 OK, pole objektů s poli `tmdb_id`, `title`, `year`, `overview`, `poster_path`, `rating`.
 
----
+Chyby:
+- 400 pokud chybí `query` nebo je `type` neplatný.
+- 500 při interní chybě (např. problém s TMDB klientem).
 
-### 3. Detail filmu
-**GET** `/api/movie/<tmdb_id>`
+### Přiřazení metadat k položce
 
-Vrací kompletní informace o filmu podle TMDB ID.
+- POST /api/assign-metadata
 
-**Parametry:**
-- `tmdb_id` (int): TMDB ID filmu
+Tělo (JSON):
+- internal_id (int) — interní index položky v databázi
+- tmdb_id (int) — TMDB ID z výsledků vyhledávání
+- type (string) — 'movie' nebo 'tv' / 'tv_show'
 
-**Response:**
+Popis: Načte podrobné metadata z TMDB (podle typu), přiřadí je k položce, stáhne lokální obrázky (poster/backdrop), uloží do databáze.
+
+Odpověď: 200 OK při úspěchu: {"success": true, "message": "Metadata assigned successfully"}
+
+Chyby:
+- 400 pokud chybí povinné parametry nebo je `type` neplatný.
+- 404 pokud `internal_id` není platné.
+- 500 při interní chybě (např. selhání TMDB nebo uložení).
+
+### Nastavení aplikace
+
+- GET /api/settings
+	- Popis: Vrátí aktuální konfiguraci (obsah config.json načtený při startu nebo default hodnoty).
+
+- POST /api/settings
+	- Tělo (JSON): možné klíče
+		- folders_to_scan: pole string (cesty)
+		- tmdb_api_key: string
+		- tmdb_language: string
+		- scan_interval: int (v sekundách)
+	- Popis: Uloží konfiguraci do `config/config.json`, aktualizuje TMDB klienta a scanner.
+	- Odpověď: 200 OK při úspěchu nebo 500 při selhání uložení.
+
+### Spuštění skenu
+
+- POST /api/scan
+
+Popis: Spustí sken složek (konfigurovaných v `folders_to_scan`). Pokud je TMDB klient nakonfigurován, provede i enrich (okamžité dotazování TMDB během skenu). Odstraní chybějící soubory z databáze a přidá nové položky.
+
+Odpověď: 200 OK s přehledem výsledků (příklad):
+
 ```json
 {
-  "id": 550,
-  "title": "Fight Club",
-  "original_title": "Fight Club",
-  "release_date": "1999-10-15",
-  "overview": "A ticking-time-bomb insomniac...",
-  "poster_path": "/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg",
-  "backdrop_path": "/fCayJrkfRaCRCTh8GqN30f8oyQF.jpg",
-  "local_poster_path": "C:/dev/streamlet_connector/data/images/550_poster_xxx.jpg",
-  "local_backdrop_path": "C:/dev/streamlet_connector/data/images/550_backdrop_xxx.jpg",
-  "genres": ["Drama"],
-  "runtime": 139,
-  "vote_average": 8.4,
-  "file_path": "//192.168.0.250/Filmy/Fight Club (1999).mkv",
-  "year": "1999",
-  "internal_id": 42
+	"success": true,
+	"total_found": 42,
+	"new_items": 5,
+	"removed_items": 2,
+	"enriched_with_metadata": 18,
+	"message": "Found 42 items, added 5 new, removed 2 missing"
 }
 ```
 
-**Status kódy:**
-- `200`: Úspěch
-- `404`: Film nenalezen
+Chyby: 500 při interním selhání.
 
----
+### Stav postupu skenu
 
-### 4. Detail seriálu
-**GET** `/api/tv-show/<tmdb_id>`
+- GET /api/progress
 
-Vrací kompletní informace o seriálu podle TMDB ID.
+Popis: Vrátí objekt s průběhem skenu. Implementace závisí na `ProgressTracker` v kódu.
 
-**Parametry:**
-- `tmdb_id` (int): TMDB ID seriálu
+Odpověď: 200 OK s JSONem (struktura výsledku je definována v `ProgressTracker.get_progress()`).
 
-**Response:**
-```json
-{
-  "id": 1396,
-  "name": "Breaking Bad",
-  "original_name": "Breaking Bad",
-  "first_air_date": "2008-01-20",
-  "overview": "When Walter White...",
-  "poster_path": "/...",
-  "backdrop_path": "/...",
-  "local_poster_path": "C:/dev/streamlet_connector/data/images/1396_poster_xxx.jpg",
-  "local_backdrop_path": "C:/dev/streamlet_connector/data/images/1396_backdrop_xxx.jpg",
-  "genres": ["Drama", "Crime"],
-  "number_of_seasons": 5,
-  "number_of_episodes": 62,
-  "vote_average": 9.2,
-  "file_path": "//192.168.0.250/Serialy/Breaking Bad",
-  "seasons": [...],
-  "internal_id": 15
-}
-```
+### Správa databáze
 
-**Status kódy:**
-- `200`: Úspěch
-- `404`: Seriál nenalezen
+- POST /api/database/clear
 
----
+Popis: Smaže celou databázi a všechny lokální obrázky (data/images). Použití riskantní — nevratné.
 
-### 5. Seznam všech video souborů (streamů)
-**GET** `/api/streams`
+Odpověď: 200 OK při úspěchu, nebo 500 při selhání.
 
-Vrací seznam všech video souborů v databázi.
+### Servírování obrázků
 
-**Response:**
-```json
-[
-  {
-    "id": 0,
-    "name": "Fight Club (1999).mkv",
-    "type": "mkv",
-    "size": 4589654123,
-    "title": "Fight Club",
-    "media_type": "movie",
-    "tmdb_id": 550
-  },
-  {
-    "id": 1,
-    "name": "Inception (2010).mp4",
-    "type": "mp4",
-    "size": 3842156789,
-    "title": "Inception",
-    "media_type": "movie",
-    "tmdb_id": 27205
-  },
-  ...
-]
-```
+- GET /api/images/<filename>
 
-**Pole:**
-- `id` (int): Interní ID pro přístup ke streamu
-- `name` (string): Jméno souboru
-- `type` (string): Typ souboru (mkv, mp4, avi, ...)
-- `size` (int): Velikost v bytech
-- `title` (string): Název filmu/seriálu
-- `media_type` (string): "movie" nebo "tv_show"
-- `tmdb_id` (int|null): TMDB ID nebo null
+Popis: Servíruje lokální images uložené ve `data/images`.
 
----
+Chyby: 404 pokud obrázek neexistuje.
 
-### 6. Stream/download video souboru
-**GET** `/api/stream/<stream_id>`
+### Legacy endpointy — přehled (kompatibilita)
 
-Vrací video soubor pro streaming nebo download.
+- GET /api/movies
+	- Vrátí pole všech filmů (ty, které mají `type == 'movie'` a metadata).
+	- Každý prvek obsahuje: `id` (TMDB id), `title`, `poster`, `rating`.
 
-**Parametry:**
-- `stream_id` (int): Interní ID ze seznamu streamů
+- GET /api/tv-shows
+	- Vrátí pole všech TV show (ty, které mají `type == 'tv_show'`).
 
-**Response:**
-- Video soubor (binární data)
-- Content-Type podle typu souboru
+- GET /api/movie/<int:tmdb_id>
+	- Vrátí detailní metadata pro film s daným TMDB ID, včetně `local_poster_path`, `local_backdrop_path`, `file_path`, `year`, a `internal_id`.
+	- 404 pokud není nalezen.
 
-**Použití:**
-```html
-<!-- Video player -->
-<video controls>
-  <source src="http://localhost:5000/api/stream/0" type="video/mp4">
-</video>
+- GET /api/tv-show/<int:tmdb_id>
+	- Vrátí detailní metadata pro TV show (včetně seznamu sezon `seasons` a `internal_id`).
+	- 404 pokud není nalezen.
 
-<!-- Download link -->
-<a href="http://localhost:5000/api/stream/0" download>Stáhnout film</a>
-```
+### Streamy (video soubory)
 
-**Status kódy:**
-- `200`: Úspěch
-- `404`: Stream nenalezen nebo soubor neexistuje
-- `500`: Chyba při čtení souboru
+- GET /api/streams
+	- Vrátí seznam všech video souborů nalezených v databázi s informacemi: `id` (interní index), `name`, `type` (přípona), `size`, `title`, `media_type`, `tmdb_id`.
 
----
+- GET /api/stream/<int:stream_id>
+	- Vrátí přímo video soubor (posílá soubor přes Flask `send_file`) pro streamování nebo stažení.
+	- 404 pokud `stream_id` neexistuje nebo soubor chybí.
 
-### 7. Informace o streamu
-**GET** `/api/stream/<stream_id>/info`
+- GET /api/stream/<int:stream_id>/info
+	- Vrátí metadata o souboru bez stažení: `id`, `path`, `name`, `type`, `size`, `url` (odkaz na `/api/stream/<id>`).
 
-Vrací informace o video souboru bez stahování.
+### Health check
 
-**Parametry:**
-- `stream_id` (int): Interní ID streamu
+- GET /api/health
+	- Vrací status aplikace a souhrn počtu položek:
+		- status: 'ok'
+		- total_items
+		- movies
+		- tv_shows
 
-**Response:**
-```json
-{
-  "id": 0,
-  "path": "//192.168.0.250/Filmy/Fight Club (1999).mkv",
-  "name": "Fight Club (1999).mkv",
-  "type": "mkv",
-  "size": 4589654123,
-  "url": "/api/stream/0"
-}
-```
+## Datové struktury (přehled)
 
-**Status kódy:**
-- `200`: Úspěch
-- `404`: Stream nenalezen
+Media item (v databázi) — minimální relevantní pole:
 
----
+- path: string — absolutní cesta k souboru
+- title: string — rozumný název (např. název souboru nebo rozparsovaný název)
+- type: 'movie' nebo 'tv_show' (volitelné)
+- metadata: objekt — kompletní TMDB metadata (pokud přiřazena)
+- local_poster_path: string — název lokálního souboru s posterem uloženého v `data/images`
+- local_backdrop_path: string — název lokálního souboru s backdropem
 
-### 8. Health check
-**GET** `/api/health`
+TMDB metadata: struktura odpovídá datům vráceným TMDB API klientem (`tmdb_client`). Může obsahovat `id`, `title`/`name`, `overview`, `poster_path`, `backdrop_path`, `vote_average`, `release_date`/`first_air_date` atd.
 
-Kontrola stavu API serveru a statistiky databáze.
+## Příklady použití (curl)
 
-**Response:**
-```json
-{
-  "status": "ok",
-  "total_items": 157,
-  "movies": 105,
-  "tv_shows": 52
-}
-```
-
-## Příklady použití
-
-### cURL
+Vyhledání filmů s názvem "Inception":
 
 ```bash
-# Seznam filmů
-curl http://localhost:5000/api/movies
-
-# Detail filmu
-curl http://localhost:5000/api/movie/550
-
-# Seznam streamů
-curl http://localhost:5000/api/streams
-
-# Stáhnout video
-curl http://localhost:5000/api/stream/0 -o movie.mkv
-
-# Health check
-curl http://localhost:5000/api/health
+curl -s "http://localhost:5000/api/search?query=Inception&type=movie"
 ```
 
-### Python
+Přiřazení metadat (příklad):
 
-```python
-import requests
-
-# Získat všechny filmy
-response = requests.get('http://localhost:5000/api/movies')
-movies = response.json()
-
-for movie in movies:
-    print(f"{movie['title']} - Rating: {movie['rating']}")
-
-# Získat detail filmu
-movie_id = 550
-response = requests.get(f'http://localhost:5000/api/movie/{movie_id}')
-movie = response.json()
-print(f"Overview: {movie['overview']}")
-
-# Stream video
-stream_id = 0
-stream_url = f'http://localhost:5000/api/stream/{stream_id}'
-# Použij ve video playeru nebo stáhni:
-response = requests.get(stream_url, stream=True)
-with open('downloaded_movie.mkv', 'wb') as f:
-    for chunk in response.iter_content(chunk_size=8192):
-        f.write(chunk)
-```
-
-### JavaScript (fetch)
-
-```javascript
-// Načíst filmy
-fetch('http://localhost:5000/api/movies')
-  .then(response => response.json())
-  .then(movies => {
-    movies.forEach(movie => {
-      console.log(`${movie.title} - ${movie.rating}/10`);
-    });
-  });
-
-// Detail filmu
-const movieId = 550;
-fetch(`http://localhost:5000/api/movie/${movieId}`)
-  .then(response => response.json())
-  .then(movie => {
-    console.log('Title:', movie.title);
-    console.log('Overview:', movie.overview);
-    console.log('Genres:', movie.genres.join(', '));
-  });
-
-// Video player
-const streamId = 0;
-const videoElement = document.getElementById('player');
-videoElement.src = `http://localhost:5000/api/stream/${streamId}`;
-```
-
-## CORS
-
-Pro přístup z webových aplikací na jiných doménách můžete potřebovat povolit CORS. To lze udělat úpravou `src/api.py`:
-
-```python
-from flask_cors import CORS
-
-# V __init__ metodě:
-CORS(self.app)
-```
-
-Instalace:
 ```bash
-pip install flask-cors
+curl -X POST "http://localhost:5000/api/assign-metadata" \
+	-H "Content-Type: application/json" \
+	-d '{"internal_id":0, "tmdb_id":27205, "type":"movie"}'
 ```
 
-## Poznámky
+Získání seznamu streamů:
 
-- **Velikosti souborů**: API neomezuje velikost streamovaných souborů
-- **Výkon**: Pro produkční použití doporučujeme nginx nebo jiný reverse proxy
-- **Bezpečnost**: API nemá autentizaci - použijte firewall nebo VPN pro bezpečný přístup
-- **Databáze**: API používá `data/media_db.json` - ujistěte se, že máte naskenovaná data
+```bash
+curl "http://localhost:5000/api/streams"
+```
+
+Stažení nebo stream video souboru s ID 3 (otevře soubor v prohlížeči nebo přehraje v přehrávači):
+
+```bash
+curl -v "http://localhost:5000/api/stream/3" --output "video.mp4"
+```
+
+## Chyby a stavové kódy
+
+- 200 — OK (úspěšné odpovědi)
+- 400 — špatný požadavek (chybějící parametry nebo nevalidní hodnoty)
+- 404 — nenalezeno (položka/databáze/soubor)
+- 500 — interní chyba serveru (např. problém s uložením, TMDB, čtením souboru)
+
+V případě 500 endpointy vrací JSON s `error` polem popisujícím chybu.
+
+## Poznámky a doporučení
+
+- API nemá implementovanou autentizaci — doporučeno omezit přístup (např. běžet za reverzním proxy s autentizací) pokud bude vystaveno do sítě.
+- Operace jako `/api/database/clear` jsou nevratné — používejte s opatrností.
+- Cesty k obrázkům vracené v polích jako `poster` jsou pouze názvy souborů; k jejich načtení použijte `/api/images/<filename>`.
+
+## Další kroky / vylepšení
+
+- Přidat autentizaci a autorizaci
+- Přidat paging / filtrování pro `/api/items` a `/api/streams`
+- Přidat detailní příklady odpovědí pro každou chybu
+- Přidat testy integrace pro hlavní endpointy
+
+---
+
+Soubor: `src/api.py` — dokumentované endpointy byly zdokumentovány výše.
+
+Pokud chcete, mohu doplnit i auto-generované OpenAPI/Swagger schéma nebo připravit ukázkové Postman kolekce.
