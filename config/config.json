@@ -2,7 +2,7 @@
     "folders_to_scan": [
         "//192.168.0.250/Filmy/"
     ],
-    "tmdb_api_key": "a4f823227d923d54afee1aea4558f072",
+    "tmdb_api_key": "",
     "tmdb_language": "cs-CZ",
     "custom_api_url": "http://localhost:5000/media",
     "scan_interval": 3600
